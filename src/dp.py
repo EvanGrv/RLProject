@@ -38,6 +38,68 @@ class PolicyIteration:
         self.policy = None
         self.history = []
         
+        # Initialiser les structures MDP
+        self._initialize_mdp_structures()
+        
+    def _initialize_mdp_structures(self):
+        """Initialise les structures MDP nécessaires."""
+        # Obtenir les informations MDP de l'environnement
+        if hasattr(self.env, 'get_mdp_info'):
+            # Environnement personnalisé avec get_mdp_info()
+            mdp_info = self.env.get_mdp_info()
+            self.states = list(mdp_info['states'])
+            self.actions = mdp_info['actions']
+            self.transition_matrix = mdp_info['transition_matrix']
+            self.reward_matrix = mdp_info['reward_matrix']
+            self.terminals = mdp_info['terminals']
+            self.n_states = len(self.states)
+            self.n_actions = len(self.actions)
+            
+        elif hasattr(self.env, 'nS') and hasattr(self.env, 'nA'):
+            # Environnement gym discret
+            self.n_states = self.env.nS
+            self.n_actions = self.env.nA
+            self.states = list(range(self.n_states))
+            self.actions = list(range(self.n_actions))
+            self.terminals = []
+            
+            # Extraire les matrices de transition et de récompense
+            if hasattr(self.env, 'P'):
+                self.transition_matrix, self.reward_matrix = self._extract_gym_dynamics()
+            else:
+                raise ValueError("Environnement gym sans dynamique disponible")
+                
+        else:
+            # Environnement générique
+            self.n_states = getattr(self.env, 'observation_space', type('obj', (object,), {'n': 16})).n
+            self.n_actions = getattr(self.env, 'action_space', type('obj', (object,), {'n': 4})).n
+            self.states = list(range(self.n_states))
+            self.actions = list(range(self.n_actions))
+            self.terminals = []
+            
+            # Créer des matrices par défaut
+            self.transition_matrix = np.zeros((self.n_states, self.n_actions, self.n_states))
+            self.reward_matrix = np.zeros((self.n_states, self.n_actions))
+            
+    def _extract_gym_dynamics(self):
+        """Extrait les dynamiques d'un environnement Gym."""
+        # Matrice de transition P(s'|s,a)
+        transition_matrix = np.zeros((self.n_states, self.n_actions, self.n_states))
+        # Matrice de récompense R(s,a)
+        reward_matrix = np.zeros((self.n_states, self.n_actions))
+        
+        for s in range(self.n_states):
+            for a in range(self.n_actions):
+                if s in self.env.P and a in self.env.P[s]:
+                    for prob, next_state, reward, done in self.env.P[s][a]:
+                        transition_matrix[s, a, next_state] += prob
+                        reward_matrix[s, a] += prob * reward
+                        
+                        if done and next_state not in self.terminals:
+                            self.terminals.append(next_state)
+        
+        return transition_matrix, reward_matrix
+        
     def policy_evaluation(self, policy: np.ndarray) -> np.ndarray:
         """
         Évalue une politique donnée.
@@ -48,37 +110,32 @@ class PolicyIteration:
         Returns:
             Fonction de valeur d'état
         """
-        V = np.copy(self.V) if self.V is not None else np.random.random((self.n_states,))
-        
-        # Les états terminaux ont une valeur de 0
-        if hasattr(self, 'terminal_states'):
-            V[self.terminal_states] = 0.0
+        V = np.zeros(self.n_states)
         
         while True:
             delta = 0.0
             
             for s in self.states:
+                if s in self.terminals:
+                    continue
+                    
                 v = V[s]
-                total = 0.0
-                
-                # Calculer la valeur pour l'action dictée par la politique
                 action = policy[s]
-                for s_p in self.states:
-                    for r_index in range(len(self.rewards)):
-                        r = self.rewards[r_index]
-                        prob = self.transition_probs[s, action, s_p, r_index]
-                        total += prob * (r + self.gamma * V[s_p])
                 
-                V[s] = total
-                abs_diff = np.abs(v - V[s])
-                delta = np.maximum(delta, abs_diff)
+                # Calculer la nouvelle valeur
+                new_value = self.reward_matrix[s, action]
+                for s_prime in self.states:
+                    new_value += self.gamma * self.transition_matrix[s, action, s_prime] * V[s_prime]
+                
+                V[s] = new_value
+                delta = max(delta, abs(v - V[s]))
             
             if delta < self.theta:
                 break
         
         return V
         
-    def policy_improvement(self, V: np.ndarray) -> np.ndarray:
+    def policy_improvement(self, V: np.ndarray) -> Tuple[np.ndarray, bool]:
         """
         Améliore la politique basée sur la fonction de valeur.
         
@@ -86,28 +143,28 @@ class PolicyIteration:
             V: Fonction de valeur d'état
             
         Returns:
-            Politique améliorée
+            Tuple (nouvelle politique, politique stable)
         """
         new_policy = np.copy(self.policy)
         policy_stable = True
         
         for s in self.states:
+            if s in self.terminals:
+                continue
+                
             old_action = new_policy[s]
             best_action = None
-            best_score = -np.inf
+            best_value = -np.inf
             
             # Évaluer toutes les actions possibles
             for a in self.actions:
-                score = 0.0
-                for s_p in self.states:
-                    for r_index in range(len(self.rewards)):
-                        r = self.rewards[r_index]
-                        prob = self.transition_probs[s, a, s_p, r_index]
-                        score += prob * (r + self.gamma * V[s_p])
+                value = self.reward_matrix[s, a]
+                for s_prime in self.states:
+                    value += self.gamma * self.transition_matrix[s, a, s_prime] * V[s_prime]
                 
-                if best_action is None or score > best_score:
+                if value > best_value:
+                    best_value = value
                     best_action = a
-                    best_score = score
             
             if best_action != old_action:
                 policy_stable = False
@@ -116,6 +173,56 @@ class PolicyIteration:
         
         return new_policy, policy_stable
         
+    def policy_iteration(self, max_iterations: int = 1000) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Exécute l'algorithme Policy Iteration complet.
+        
+        Args:
+            max_iterations: Nombre maximum d'itérations
+            
+        Returns:
+            Tuple (politique optimale, fonction de valeur optimale)
+        """
+        # Initialiser la politique aléatoirement
+        self.policy = np.random.choice(self.actions, size=self.n_states)
+        
+        # Mettre les états terminaux à l'action 0
+        for terminal in self.terminals:
+            if terminal < self.n_states:
+                self.policy[terminal] = 0
+        
+        self.history = []
+        
+        for iteration in range(max_iterations):
+            # 1. Évaluation de politique
+            self.V = self.policy_evaluation(self.policy)
+            
+            # 2. Amélioration de politique
+            new_policy, policy_stable = self.policy_improvement(self.V)
+            
+            # Enregistrer les statistiques
+            avg_value = np.mean(self.V)
+            max_value = np.max(self.V)
+            
+            self.history.append({
+                'iteration': iteration + 1,
+                'avg_value': avg_value,
+                'max_value': max_value,
+                'policy_stable': policy_stable
+            })
+            
+            print(f"Itération {iteration + 1}: Valeur moyenne = {avg_value:.6f}")
+            
+            # Mise à jour de la politique
+            self.policy = new_policy
+            
+            # Vérifier la convergence
+            if policy_stable:
+                print(f"Convergence atteinte après {iteration + 1} itérations")
+                break
+        
+        return self.policy, self.V
+    
     def train(self, max_iterations: int = 1000) -> Dict[str, Any]:
         """
         Entraîne l'algorithme Policy Iteration.
@@ -126,153 +233,114 @@ class PolicyIteration:
         Returns:
             Dictionnaire contenant les résultats d'entraînement
         """
-        # Initialiser les structures nécessaires
-        self._initialize_mdp_structures()
-        
-        # Initialiser V et politique
-        self.V = np.random.random((self.n_states,))
-        if hasattr(self, 'terminal_states'):
-            self.V[self.terminal_states] = 0.0
-        
-        # Politique initiale aléatoire
-        self.policy = np.array([np.random.choice(self.actions) for _ in self.states])
-        if hasattr(self, 'terminal_states'):
-            self.policy[self.terminal_states] = 0
-        
-        # Historique d'entraînement
-        self.history = []
-        
-        iteration = 0
-        while iteration < max_iterations:
-            iteration += 1
-            
-            # 1. Policy Evaluation
-            self.V = self.policy_evaluation(self.policy)
-            
-            # 2. Policy Improvement
-            new_policy, policy_stable = self.policy_improvement(self.V)
-            
-            # Enregistrer les statistiques
-            avg_value = np.mean(self.V)
-            max_value = np.max(self.V)
-            
-            self.history.append({
-                'iteration': iteration,
-                'avg_value': avg_value,
-                'max_value': max_value,
-                'policy_stable': policy_stable
-            })
-            
-            # Mise à jour de la politique
-            self.policy = new_policy
-            
-            # Vérifier la convergence
-            if policy_stable:
-                print(f"Convergence atteinte après {iteration} itérations")
-                break
+        policy, V = self.policy_iteration(max_iterations)
         
         return {
+            'policy': policy,
+            'V': V,
+            'history': self.history,
+            'iterations': len(self.history),
+            'converged': len(self.history) < max_iterations
+        }
+    
+    def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
+        """
+        Évalue la politique apprise.
+        
+        Args:
+            num_episodes: Nombre d'épisodes d'évaluation
+            
+        Returns:
+            Dictionnaire avec les métriques d'évaluation
+        """
+        if self.policy is None:
+            raise ValueError("Aucune politique disponible. Entraînez d'abord l'algorithme.")
+        
+        total_rewards = []
+        total_steps = []
+        successes = 0
+        
+        for _ in range(num_episodes):
+            state = self.env.reset()
+            episode_reward = 0
+            steps = 0
+            done = False
+            
+            while not done and steps < 1000:
+                action = self.policy[state]
+                state, reward, done, _ = self.env.step(action)
+                episode_reward += reward
+                steps += 1
+            
+            total_rewards.append(episode_reward)
+            total_steps.append(steps)
+            
+            if episode_reward > 0:
+                successes += 1
+        
+        return {
+            'average_reward': float(np.mean(total_rewards)),
+            'std_reward': float(np.std(total_rewards)),
+            'success_rate': successes / num_episodes,
+            'average_steps': float(np.mean(total_steps)),
+            'std_steps': float(np.std(total_steps))
+        }
+    
+    def get_action(self, state: int) -> int:
+        """
+        Retourne l'action selon la politique apprise.
+        
+        Args:
+            state: État courant
+            
+        Returns:
+            Action à prendre
+        """
+        if self.policy is None:
+            raise ValueError("Aucune politique disponible. Entraînez d'abord l'algorithme.")
+        
+        return self.policy[state]
+    
+    def save(self, filepath: str) -> None:
+        """
+        Sauvegarde le modèle.
+        
+        Args:
+            filepath: Chemin de sauvegarde
+        """
+        model_data = {
             'policy': self.policy,
             'V': self.V,
             'history': self.history,
-            'iterations': iteration,
-            'converged': policy_stable if 'policy_stable' in locals() else False
-        }
-    
-    def _initialize_mdp_structures(self):
-        """
-        Initialise les structures nécessaires pour un MDP.
-        Cette méthode doit être adaptée selon votre environnement spécifique.
-        """
-        # À adapter selon votre environnement
-        # Exemple pour un environnement discret
-        
-        if hasattr(self.env, 'nS') and hasattr(self.env, 'nA'):
-            # Environnement gym discret (comme FrozenLake)
-            self.n_states = self.env.nS
-            self.n_actions = self.env.nA
-            self.states = list(range(self.n_states))
-            self.actions = list(range(self.n_actions))
-            
-            # Initialiser les récompenses possibles
-            self.rewards = [0.0, 1.0]  # À adapter selon votre environnement
-            
-            # Initialiser les probabilités de transition
-            self._initialize_transition_probabilities()
-            
-        else:
-            # Environnement générique - à adapter
-            self.n_states = getattr(self.env, 'observation_space', type('obj', (object,), {'n': 16})).n
-            self.n_actions = getattr(self.env, 'action_space', type('obj', (object,), {'n': 4})).n
-            self.states = list(range(self.n_states))
-            self.actions = list(range(self.n_actions))
-            self.rewards = [0.0, 1.0]
-            
-            # Probabilités de transition par défaut (à adapter)
-            self.transition_probs = np.ones((self.n_states, self.n_actions, self.n_states, len(self.rewards))) / (self.n_states * len(self.rewards))
-    
-    def _initialize_transition_probabilities(self):
-        """
-        Initialise les probabilités de transition depuis l'environnement.
-        """
-        self.transition_probs = np.zeros((self.n_states, self.n_actions, self.n_states, len(self.rewards)))
-        
-        # Si l'environnement a des probabilités de transition accessibles
-        if hasattr(self.env, 'P'):
-            for s in self.states:
-                for a in self.actions:
-                    if s in self.env.P and a in self.env.P[s]:
-                        for prob, next_state, reward, done in self.env.P[s][a]:
-                            # Trouver l'index de la récompense
-                            r_index = 0
-                            if reward in self.rewards:
-                                r_index = self.rewards.index(reward)
-                            else:
-                                # Ajouter la nouvelle récompense
-                                self.rewards.append(reward)
-                                r_index = len(self.rewards) - 1
-                                # Redimensionner le tableau des probabilités
-                                new_shape = (self.n_states, self.n_actions, self.n_states, len(self.rewards))
-                                new_probs = np.zeros(new_shape)
-                                new_probs[:, :, :, :-1] = self.transition_probs
-                                self.transition_probs = new_probs
-                            
-                            self.transition_probs[s, a, next_state, r_index] = prob
-        else:
-            # Distribution uniforme par défaut
-            uniform_prob = 1.0 / (self.n_states * len(self.rewards))
-            self.transition_probs.fill(uniform_prob)
-        
-    def save(self, filepath: str):
-        """Sauvegarde le modèle."""
-        model_data = {
-            'V': self.V,
-            'policy': self.policy,
             'gamma': self.gamma,
-            'theta': self.theta,
-            'history': self.history
+            'theta': self.theta
         }
         save_model(model_data, filepath)
         
-    def load(self, filepath: str):
-        """Charge un modèle sauvegardé."""
+    def load(self, filepath: str) -> None:
+        """
+        Charge le modèle.
+        
+        Args:
+            filepath: Chemin du modèle
+        """
         model_data = load_model(filepath)
-        self.V = model_data['V']
         self.policy = model_data['policy']
+        self.V = model_data['V']
+        self.history = model_data['history']
         self.gamma = model_data['gamma']
         self.theta = model_data['theta']
-        self.history = model_data['history']
 
 
 class ValueIteration:
     """
     Implémentation de l'algorithme Value Iteration.
     
-    Value Iteration met à jour directement la fonction de valeur en utilisant
-    l'équation de Bellman jusqu'à convergence vers la fonction de valeur optimale.
+    Value Iteration met à jour directement la fonction de valeur
+    jusqu'à convergence, puis extrait la politique optimale.
     """
     
-    def __init__(self, env: Any, gamma: float = 0.999999, theta: float = 1e-5):
+    def __init__(self, env: Any, gamma: float = 0.9, theta: float = 1e-6):
         """
         Initialise Value Iteration.
         
@@ -288,72 +356,160 @@ class ValueIteration:
         self.policy = None
         self.history = []
         
-    def value_update(self, V: np.ndarray) -> Tuple[np.ndarray, float]:
+        # Initialiser les structures MDP
+        self._initialize_mdp_structures()
+        
+    def _initialize_mdp_structures(self):
+        """Initialise les structures MDP nécessaires."""
+        # Obtenir les informations MDP de l'environnement
+        if hasattr(self.env, 'get_mdp_info'):
+            # Environnement personnalisé avec get_mdp_info()
+            mdp_info = self.env.get_mdp_info()
+            self.states = list(mdp_info['states'])
+            self.actions = mdp_info['actions']
+            self.transition_matrix = mdp_info['transition_matrix']
+            self.reward_matrix = mdp_info['reward_matrix']
+            self.terminals = mdp_info['terminals']
+            self.n_states = len(self.states)
+            self.n_actions = len(self.actions)
+            
+        elif hasattr(self.env, 'nS') and hasattr(self.env, 'nA'):
+            # Environnement gym discret
+            self.n_states = self.env.nS
+            self.n_actions = self.env.nA
+            self.states = list(range(self.n_states))
+            self.actions = list(range(self.n_actions))
+            self.terminals = []
+            
+            # Extraire les matrices de transition et de récompense
+            if hasattr(self.env, 'P'):
+                self.transition_matrix, self.reward_matrix = self._extract_gym_dynamics()
+            else:
+                raise ValueError("Environnement gym sans dynamique disponible")
+                
+        else:
+            # Environnement générique
+            self.n_states = getattr(self.env, 'observation_space', type('obj', (object,), {'n': 16})).n
+            self.n_actions = getattr(self.env, 'action_space', type('obj', (object,), {'n': 4})).n
+            self.states = list(range(self.n_states))
+            self.actions = list(range(self.n_actions))
+            self.terminals = []
+            
+            # Créer des matrices par défaut
+            self.transition_matrix = np.zeros((self.n_states, self.n_actions, self.n_states))
+            self.reward_matrix = np.zeros((self.n_states, self.n_actions))
+            
+    def _extract_gym_dynamics(self):
+        """Extrait les dynamiques d'un environnement Gym."""
+        # Matrice de transition P(s'|s,a)
+        transition_matrix = np.zeros((self.n_states, self.n_actions, self.n_states))
+        # Matrice de récompense R(s,a)
+        reward_matrix = np.zeros((self.n_states, self.n_actions))
+        
+        for s in range(self.n_states):
+            for a in range(self.n_actions):
+                if s in self.env.P and a in self.env.P[s]:
+                    for prob, next_state, reward, done in self.env.P[s][a]:
+                        transition_matrix[s, a, next_state] += prob
+                        reward_matrix[s, a] += prob * reward
+                        
+                        if done and next_state not in self.terminals:
+                            self.terminals.append(next_state)
+        
+        return transition_matrix, reward_matrix
+        
+    def value_iteration(self, max_iterations: int = 1000) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Met à jour la fonction de valeur selon l'équation de Bellman.
+        Exécute l'algorithme Value Iteration complet.
         
         Args:
-            V: Fonction de valeur actuelle
+            max_iterations: Nombre maximum d'itérations
             
         Returns:
-            Tuple contenant la fonction de valeur mise à jour et le delta maximal
+            Tuple (politique optimale, fonction de valeur optimale)
         """
-        new_V = np.copy(V)
-        delta = 0.0
+        # Initialiser la fonction de valeur
+        self.V = np.zeros(self.n_states)
+        self.history = []
         
-        for s in self.states:
-            if s in self.terminal_states:
-                continue  # Ne pas mettre à jour les états terminaux
+        for iteration in range(max_iterations):
+            delta = 0.0
             
-            v = V[s]  # Ancienne valeur
-            max_value = float('-inf')
+            for s in self.states:
+                if s in self.terminals:
+                    continue
+                    
+                v = self.V[s]
+                best_value = -np.inf
+                
+                # Trouver la meilleure action
+                for a in self.actions:
+                    value = self.reward_matrix[s, a]
+                    for s_prime in self.states:
+                        value += self.gamma * self.transition_matrix[s, a, s_prime] * self.V[s_prime]
+                    
+                    if value > best_value:
+                        best_value = value
+                
+                self.V[s] = best_value
+                delta = max(delta, abs(v - self.V[s]))
             
-            # Maximiser sur toutes les actions possibles
-            for a in self.actions:
-                value = 0.0
-                for s_p in self.states:
-                    for r_idx, r in enumerate(self.rewards):
-                        prob = self.transition_probs[s, a, s_p, r_idx]
-                        value += prob * (r + self.gamma * V[s_p])
-                max_value = max(max_value, value)
+            # Enregistrer les statistiques
+            avg_value = np.mean(self.V)
+            max_value = np.max(self.V)
             
-            new_V[s] = max_value
-            delta = max(delta, abs(v - new_V[s]))
+            self.history.append({
+                'iteration': iteration + 1,
+                'avg_value': avg_value,
+                'max_value': max_value,
+                'delta': delta
+            })
+            
+            print(f"Itération {iteration + 1}: Valeur moyenne = {avg_value:.6f}, Delta = {delta:.6f}")
+            
+            # Vérifier la convergence
+            if delta < self.theta:
+                print(f"Convergence atteinte après {iteration + 1} itérations")
+                break
         
-        return new_V, delta
+        # Extraire la politique optimale
+        self.policy = self._extract_policy(self.V)
         
-    def extract_policy(self, V: np.ndarray) -> np.ndarray:
+        return self.policy, self.V
+    
+    def _extract_policy(self, V: np.ndarray) -> np.ndarray:
         """
         Extrait la politique optimale de la fonction de valeur.
         
         Args:
-            V: Fonction de valeur optimale
+            V: Fonction de valeur
             
         Returns:
-            Politique optimale (matrice de probabilités)
+            Politique optimale
         """
-        # Politique sous forme de matrice de probabilités
-        policy = np.zeros((self.n_states, self.n_actions), dtype=np.float64)
+        policy = np.zeros(self.n_states, dtype=int)
         
         for s in self.states:
-            if s in self.terminal_states:
+            if s in self.terminals:
+                policy[s] = 0
                 continue
+                
+            best_action = None
+            best_value = -np.inf
             
-            action_values = []
             for a in self.actions:
-                value = 0.0
-                for s_p in self.states:
-                    for r_idx, r in enumerate(self.rewards):
-                        prob = self.transition_probs[s, a, s_p, r_idx]
-                        value += prob * (r + self.gamma * V[s_p])
-                action_values.append(value)
+                value = self.reward_matrix[s, a]
+                for s_prime in self.states:
+                    value += self.gamma * self.transition_matrix[s, a, s_prime] * V[s_prime]
+                
+                if value > best_value:
+                    best_value = value
+                    best_action = a
             
-            # Politique déterministe optimale
-            best_action = np.argmax(action_values)
-            policy[s, best_action] = 1.0
+            policy[s] = best_action
         
         return policy
-        
+    
     def train(self, max_iterations: int = 1000) -> Dict[str, Any]:
         """
         Entraîne l'algorithme Value Iteration.
@@ -364,144 +520,100 @@ class ValueIteration:
         Returns:
             Dictionnaire contenant les résultats d'entraînement
         """
-        # Initialiser les structures MDP
-        self._initialize_mdp_structures()
-        
-        # Étape 1: Initialiser les valeurs à zéro
-        self.V = np.zeros(self.n_states, dtype=np.float64)
-        
-        # Historique d'entraînement
-        self.history = []
-        
-        iteration = 0
-        converged = False
-        
-        while iteration < max_iterations:
-            iteration += 1
-            
-            # Mise à jour de la fonction de valeur
-            new_V, delta = self.value_update(self.V)
-            
-            # Enregistrer les statistiques
-            avg_value = np.mean(self.V)
-            max_value = np.max(self.V)
-            
-            self.history.append({
-                'iteration': iteration,
-                'delta': delta,
-                'avg_value': avg_value,
-                'max_value': max_value,
-                'converged': delta < self.theta
-            })
-            
-            # Mise à jour de V
-            self.V = new_V
-            
-            # Vérifier la convergence
-            if delta < self.theta:
-                converged = True
-                print(f"Convergence atteinte après {iteration} itérations (delta = {delta:.6f})")
-                break
-        
-        # Étape 3: Extraire la politique optimale
-        self.policy = self.extract_policy(self.V)
+        policy, V = self.value_iteration(max_iterations)
         
         return {
-            'V': self.V,
-            'policy': self.policy,
+            'policy': policy,
+            'V': V,
             'history': self.history,
-            'iterations': iteration,
-            'converged': converged,
-            'final_delta': delta if 'delta' in locals() else None
+            'iterations': len(self.history),
+            'converged': len(self.history) < max_iterations
         }
     
-    def _initialize_mdp_structures(self):
+    def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
         """
-        Initialise les structures nécessaires pour un MDP.
+        Évalue la politique apprise.
+        
+        Args:
+            num_episodes: Nombre d'épisodes d'évaluation
+            
+        Returns:
+            Dictionnaire avec les métriques d'évaluation
         """
-        if hasattr(self.env, 'nS') and hasattr(self.env, 'nA'):
-            # Environnement gym discret
-            self.n_states = self.env.nS
-            self.n_actions = self.env.nA
-            self.states = list(range(self.n_states))
-            self.actions = list(range(self.n_actions))
+        if self.policy is None:
+            raise ValueError("Aucune politique disponible. Entraînez d'abord l'algorithme.")
+        
+        total_rewards = []
+        total_steps = []
+        successes = 0
+        
+        for _ in range(num_episodes):
+            state = self.env.reset()
+            episode_reward = 0
+            steps = 0
+            done = False
             
-            # Initialiser les récompenses possibles
-            self.rewards = [0.0, 1.0]  # À adapter selon l'environnement
+            while not done and steps < 1000:
+                action = self.policy[state]
+                state, reward, done, _ = self.env.step(action)
+                episode_reward += reward
+                steps += 1
             
-            # Identifier les états terminaux
-            self.terminal_states = []
-            if hasattr(self.env, 'desc'):
-                # Pour FrozenLake par exemple
-                desc = self.env.desc
-                for i in range(desc.shape[0]):
-                    for j in range(desc.shape[1]):
-                        if desc[i, j] in [b'H', b'G']:  # Hole ou Goal
-                            self.terminal_states.append(i * desc.shape[1] + j)
+            total_rewards.append(episode_reward)
+            total_steps.append(steps)
             
-            # Initialiser les probabilités de transition
-            self._initialize_transition_probabilities()
-            
-        else:
-            # Environnement générique
-            self.n_states = getattr(self.env, 'observation_space', type('obj', (object,), {'n': 16})).n
-            self.n_actions = getattr(self.env, 'action_space', type('obj', (object,), {'n': 4})).n
-            self.states = list(range(self.n_states))
-            self.actions = list(range(self.n_actions))
-            self.rewards = [0.0, 1.0]
-            self.terminal_states = []
-            
-            # Probabilités de transition par défaut
-            self.transition_probs = np.ones((self.n_states, self.n_actions, self.n_states, len(self.rewards))) / (self.n_states * len(self.rewards))
+            if episode_reward > 0:
+                successes += 1
+        
+        return {
+            'average_reward': float(np.mean(total_rewards)),
+            'std_reward': float(np.std(total_rewards)),
+            'success_rate': successes / num_episodes,
+            'average_steps': float(np.mean(total_steps)),
+            'std_steps': float(np.std(total_steps))
+        }
     
-    def _initialize_transition_probabilities(self):
+    def get_action(self, state: int) -> int:
         """
-        Initialise les probabilités de transition depuis l'environnement.
+        Retourne l'action selon la politique apprise.
+        
+        Args:
+            state: État courant
+            
+        Returns:
+            Action à prendre
         """
-        self.transition_probs = np.zeros((self.n_states, self.n_actions, self.n_states, len(self.rewards)))
+        if self.policy is None:
+            raise ValueError("Aucune politique disponible. Entraînez d'abord l'algorithme.")
         
-        # Si l'environnement a des probabilités de transition accessibles
-        if hasattr(self.env, 'P'):
-            for s in self.states:
-                for a in self.actions:
-                    if s in self.env.P and a in self.env.P[s]:
-                        for prob, next_state, reward, done in self.env.P[s][a]:
-                            # Trouver l'index de la récompense
-                            r_index = 0
-                            if reward in self.rewards:
-                                r_index = self.rewards.index(reward)
-                            else:
-                                # Ajouter la nouvelle récompense
-                                self.rewards.append(reward)
-                                r_index = len(self.rewards) - 1
-                                # Redimensionner le tableau des probabilités
-                                new_shape = (self.n_states, self.n_actions, self.n_states, len(self.rewards))
-                                new_probs = np.zeros(new_shape)
-                                new_probs[:, :, :, :-1] = self.transition_probs
-                                self.transition_probs = new_probs
-                            
-                            self.transition_probs[s, a, next_state, r_index] = prob
-        else:
-            # Distribution uniforme par défaut
-            uniform_prob = 1.0 / (self.n_states * len(self.rewards))
-            self.transition_probs.fill(uniform_prob)
+        return self.policy[state]
+    
+    def save(self, filepath: str) -> None:
+        """
+        Sauvegarde le modèle.
         
-    def save(self, filepath: str):
-        """Sauvegarde le modèle."""
+        Args:
+            filepath: Chemin de sauvegarde
+        """
         model_data = {
-            'V': self.V,
             'policy': self.policy,
+            'V': self.V,
+            'history': self.history,
             'gamma': self.gamma,
-            'theta': self.theta,
-            'history': self.history
+            'theta': self.theta
         }
         save_model(model_data, filepath)
         
-    def load(self, filepath: str):
-        """Charge un modèle sauvegardé."""
+    def load(self, filepath: str) -> None:
+        """
+        Charge le modèle.
+        
+        Args:
+            filepath: Chemin du modèle
+        """
         model_data = load_model(filepath)
-        self.V = model_data['V']
         self.policy = model_data['policy']
+        self.V = model_data['V']
+        self.history = model_data['history']
         self.gamma = model_data['gamma']
         self.theta = model_data['theta']
-        self.history = model_data['history']

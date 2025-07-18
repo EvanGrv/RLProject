@@ -10,10 +10,10 @@ Ce package contient les implémentations des principaux algorithmes de RL :
 """
 
 from .dp import PolicyIteration, ValueIteration
-from .monte_carlo import MonteCarloES, OnPolicyFirstVisitMC, OffPolicyMC
+from .monte_carlo import MonteCarloES, OnPolicyMC, OffPolicyMC
 from .td import Sarsa, QLearning, ExpectedSarsa
 from .dyna import DynaQ, DynaQPlus
-from .utils_io import save_model, load_model, list_saved_models, get_model_info
+from .utils_io import save_model, load_model, get_model_info
 
 __version__ = "1.0.0"
 __author__ = "Votre nom"
@@ -25,7 +25,7 @@ __all__ = [
     
     # Monte Carlo
     'MonteCarloES',
-    'OnPolicyFirstVisitMC',
+    'OnPolicyMC',
     'OffPolicyMC',
     
     # Temporal Difference

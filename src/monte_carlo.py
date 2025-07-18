@@ -51,189 +51,115 @@ class MonteCarloES:
             # Environnement gym discret
             self.nS = self.env.nS
             self.nA = self.env.nA
+        elif hasattr(self.env, 'observation_space') and hasattr(self.env, 'action_space'):
+            # Environnement gym avec observation/action spaces
+            self.nS = getattr(self.env.observation_space, 'n', 16)
+            self.nA = getattr(self.env.action_space, 'n', 4)
         else:
-            # Environnement générique
-            self.nS = getattr(self.env, 'observation_space', type('obj', (object,), {'n': 16})).n
-            self.nA = getattr(self.env, 'action_space', type('obj', (object,), {'n': 4})).n
+            # Environnement personnalisé - essayer d'obtenir les infos MDP
+            if hasattr(self.env, 'get_mdp_info'):
+                mdp_info = self.env.get_mdp_info()
+                self.nS = len(list(mdp_info['states']))
+                self.nA = len(mdp_info['actions'])
+            else:
+                # Valeurs par défaut
+                self.nS = 16
+                self.nA = 4
         
         # Initialiser Q et politique
         self.Q = np.zeros((self.nS, self.nA), dtype=float)
         self.policy = np.zeros(self.nS, dtype=int)
         
-        # Identifier les états terminaux
-        self.terminal_states = []
-        if hasattr(self.env, 'desc'):
-            # Pour FrozenLake par exemple
-            desc = self.env.desc
-            for i in range(desc.shape[0]):
-                for j in range(desc.shape[1]):
-                    if desc[i, j] in [b'H', b'G']:  # Hole ou Goal
-                        self.terminal_states.append(i * desc.shape[1] + j)
+        # Initialiser les dictionnaires de retours
+        self.returns_sum = defaultdict(float)
+        self.returns_count = defaultdict(int)
         
-        # Initialiser les probabilités de transition si disponibles
-        if hasattr(self.env, 'P'):
-            self.transition_probs = self._extract_transition_probabilities()
-            self.rewards = self._extract_rewards()
-        else:
-            self.transition_probs = None
-            self.rewards = [0.0, 1.0]  # Récompenses par défaut
-            
-    def _extract_transition_probabilities(self):
-        """Extrait les probabilités de transition de l'environnement."""
-        rewards = set()
-        for s in range(self.nS):
-            for a in range(self.nA):
-                if s in self.env.P and a in self.env.P[s]:
-                    for prob, next_state, reward, done in self.env.P[s][a]:
-                        rewards.add(reward)
-        
-        self.rewards = sorted(list(rewards))
-        p = np.zeros((self.nS, self.nA, self.nS, len(self.rewards)))
-        
-        for s in range(self.nS):
-            for a in range(self.nA):
-                if s in self.env.P and a in self.env.P[s]:
-                    for prob, next_state, reward, done in self.env.P[s][a]:
-                        r_idx = self.rewards.index(reward)
-                        p[s, a, next_state, r_idx] = prob
-        
-        return p
-        
-    def _extract_rewards(self):
-        """Extrait la liste des récompenses possibles."""
-        rewards = set()
-        for s in range(self.nS):
-            for a in range(self.nA):
-                if s in self.env.P and a in self.env.P[s]:
-                    for prob, next_state, reward, done in self.env.P[s][a]:
-                        rewards.add(reward)
-        return sorted(list(rewards))
-    
-    def sample_next_state_reward(self, s: int, a: int) -> Tuple[int, float]:
+    def generate_episode(self, start_state: int, start_action: int) -> List[Tuple[int, int, float]]:
         """
-        Échantillonne l'état suivant s' et la récompense r à partir des probabilités de transition.
+        Génère un épisode en commençant par l'état et l'action donnés.
         
         Args:
-            s: État actuel
-            a: Action
+            start_state: État de départ
+            start_action: Action de départ
             
         Returns:
-            Tuple (next_state, reward)
-        """
-        if self.transition_probs is None:
-            # Fallback pour environnements sans probabilités explicites
-            state = self.env.reset()
-            self.env.unwrapped.s = s
-            next_state, reward, done, _ = self.env.step(a)
-            return next_state, reward
-        
-        # Utiliser les probabilités de transition
-        num_states = self.transition_probs.shape[2]
-        num_rewards = self.transition_probs.shape[3]
-        
-        # Construire une liste de (s', r_idx) avec prob > 0
-        candidates = []
-        probs = []
-        for s_p in range(num_states):
-            for r_idx in range(num_rewards):
-                prob = self.transition_probs[s, a, s_p, r_idx]
-                if prob > 0:
-                    candidates.append((s_p, r_idx))
-                    probs.append(prob)
-        
-        # Normaliser (au cas où)
-        probs = np.array(probs, dtype=np.float64)
-        if probs.sum() > 0:
-            probs /= probs.sum()
-        else:
-            # Cas d'erreur, distribution uniforme
-            probs = np.ones(len(candidates)) / len(candidates) if candidates else np.array([1.0])
-            
-        # Tirage
-        if candidates:
-            idx = np.random.choice(len(candidates), p=probs)
-            s_p, r_idx = candidates[idx]
-            return s_p, self.rewards[r_idx]
-        else:
-            return s, 0.0
-        
-    def generate_episode(self, exploring_starts: bool = True) -> List[Tuple[int, int, float]]:
-        """
-        Génère un épisode complet avec Exploring Starts.
-        
-        Args:
-            exploring_starts: Si True, utilise exploring starts
-            
-        Returns:
-            Liste des transitions (état, action, reward)
+            Liste des transitions (état, action, récompense)
         """
         episode = []
+        state = start_state
+        action = start_action
         
-        if exploring_starts:
-            # Exploring Start: état et action initiaux aléatoires
-            start_state = random.choice(list(range(self.nS)))
-            start_action = random.choice(list(range(self.nA)))
-            
-            # Appliquer la transition (s,a) fixée par ES
-            s_next, r = self.sample_next_state_reward(start_state, start_action)
-            episode.append((start_state, start_action, r))
-            s = s_next
-        else:
-            # Démarrage normal
-            s = random.choice(list(range(self.nS)))
+        # Réinitialiser l'environnement et forcer l'état de départ
+        self.env.reset()
+        if hasattr(self.env, 'state'):
+            self.env.state = start_state
+        elif hasattr(self.env, 'current_state'):
+            self.env.current_state = start_state
         
-        # Continuer selon la politique jusqu'à l'état terminal
-        max_steps = 1000  # Protection contre les boucles infinies
+        done = False
         steps = 0
+        max_steps = 1000
         
-        while s not in self.terminal_states and steps < max_steps:
-            a = self.policy[s]
-            s_next, r = self.sample_next_state_reward(s, a)
-            episode.append((s, a, r))
-            s = s_next
-            steps += 1
-            
-            if s in self.terminal_states:
+        while not done and steps < max_steps:
+            # Prendre l'action
+            try:
+                next_state, reward, done, _ = self.env.step(action)
+                episode.append((state, action, reward))
+                
+                if done:
+                    break
+                
+                state = next_state
+                
+                # Choisir la prochaine action selon la politique
+                action = self.policy[state]
+                
+            except Exception as e:
+                # Si l'environnement ne supporte pas cette interaction
                 break
+            
+            steps += 1
         
         return episode
-        
-    def update_q_values(self, episode: List[Tuple[int, int, float]]):
+    
+    def update_q_function(self, episode: List[Tuple[int, int, float]]) -> None:
         """
-        Met à jour les valeurs Q à partir d'un épisode (First-Visit).
+        Met à jour la fonction Q basée sur un épisode.
         
         Args:
-            episode: Liste des transitions (état, action, reward)
+            episode: Liste des transitions (état, action, récompense)
         """
-        # Calculer les returns
-        G = 0.0
-        for t in range(len(episode) - 1, -1, -1):
-            s_t, a_t, r_tp1 = episode[t]
-            G = self.gamma * G + r_tp1
-            
-            # Vérifier si c'est la première visite de (s_t, a_t)
-            first_visit = True
-            for j in range(t):
-                if episode[j][0] == s_t and episode[j][1] == a_t:
-                    first_visit = False
-                    break
-            
-            if first_visit:
-                # Mettre à jour Q(s,a) avec la moyenne des returns
-                key = (s_t, a_t)
-                self.returns_sum[key] = self.returns_sum.get(key, 0.0) + G
-                self.returns_count[key] = self.returns_count.get(key, 0) + 1
-                self.Q[s_t, a_t] = self.returns_sum[key] / self.returns_count[key]
+        # Calculer les retours
+        returns = 0.0
+        visited_pairs = set()
         
-    def improve_policy(self):
-        """Met à jour la politique basée sur les valeurs Q (greedy)."""
-        for s in range(self.nS):
-            if s not in self.terminal_states:
-                self.policy[s] = int(np.argmax(self.Q[s, :]))
-        
+        # Parcourir l'épisode en sens inverse
+        for i in range(len(episode) - 1, -1, -1):
+            state, action, reward = episode[i]
+            returns = self.gamma * returns + reward
+            
+            # First-visit Monte Carlo
+            if (state, action) not in visited_pairs:
+                visited_pairs.add((state, action))
+                
+                # Mettre à jour les moyennes
+                self.returns_count[(state, action)] += 1
+                self.returns_sum[(state, action)] += returns
+                
+                # Mettre à jour Q
+                self.Q[state, action] = self.returns_sum[(state, action)] / self.returns_count[(state, action)]
+    
+    def improve_policy(self) -> None:
+        """
+        Améliore la politique basée sur la fonction Q actuelle.
+        """
+        for state in range(self.nS):
+            # Choisir l'action avec la plus haute valeur Q
+            self.policy[state] = np.argmax(self.Q[state])
+    
     def train(self, num_episodes: int = 1000) -> Dict[str, Any]:
         """
-        Entraîne l'algorithme MC-ES.
+        Entraîne l'algorithme Monte Carlo ES.
         
         Args:
             num_episodes: Nombre d'épisodes d'entraînement
@@ -241,77 +167,151 @@ class MonteCarloES:
         Returns:
             Dictionnaire contenant les résultats d'entraînement
         """
+        # Initialiser la politique aléatoirement
+        for state in range(self.nS):
+            self.policy[state] = random.randint(0, self.nA - 1)
+        
         self.history = []
         
-        for ep in range(1, num_episodes + 1):
+        for episode_num in range(num_episodes):
+            # Exploring starts: choisir un état et une action aléatoires
+            start_state = random.randint(0, self.nS - 1)
+            start_action = random.randint(0, self.nA - 1)
+            
             # Générer un épisode
-            episode = self.generate_episode(exploring_starts=True)
+            episode = self.generate_episode(start_state, start_action)
             
-            # Mettre à jour les valeurs Q
-            self.update_q_values(episode)
-            
-            # Améliorer la politique
-            self.improve_policy()
-            
-            # Enregistrer les statistiques
-            if ep % max(1, num_episodes // 20) == 0 or ep == 1:
+            if episode:  # Si l'épisode n'est pas vide
+                # Mettre à jour la fonction Q
+                self.update_q_function(episode)
+                
+                # Améliorer la politique
+                self.improve_policy()
+                
+                # Enregistrer les statistiques
+                episode_reward = sum(reward for _, _, reward in episode)
                 avg_q = np.mean(self.Q)
-                max_q = np.max(self.Q)
-                episode_length = len(episode)
                 
                 self.history.append({
-                    'episode': ep,
-                    'avg_q_value': avg_q,
-                    'max_q_value': max_q,
-                    'episode_length': episode_length,
-                    'num_state_actions_visited': len(self.returns_count)
+                    'episode': episode_num + 1,
+                    'reward': episode_reward,
+                    'avg_q': avg_q,
+                    'episode_length': len(episode)
                 })
                 
-                print(f"Épisode {ep}/{num_episodes} - Q moyen: {avg_q:.4f}, Longueur: {episode_length}")
+                if (episode_num + 1) % 100 == 0:
+                    print(f"Épisode {episode_num + 1}: Récompense = {episode_reward:.3f}, Q moyen = {avg_q:.6f}")
         
         return {
             'Q': self.Q,
             'policy': self.policy,
             'history': self.history,
-            'episodes': num_episodes,
-            'returns_sum': self.returns_sum,
-            'returns_count': self.returns_count
+            'returns_sum': dict(self.returns_sum),
+            'returns_count': dict(self.returns_count)
         }
+    
+    def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
+        """
+        Évalue la politique apprise.
         
-    def save(self, filepath: str):
-        """Sauvegarde le modèle."""
+        Args:
+            num_episodes: Nombre d'épisodes d'évaluation
+            
+        Returns:
+            Dictionnaire avec les métriques d'évaluation
+        """
+        if self.policy is None:
+            raise ValueError("Aucune politique disponible. Entraînez d'abord l'algorithme.")
+        
+        total_rewards = []
+        total_steps = []
+        successes = 0
+        
+        for _ in range(num_episodes):
+            state = self.env.reset()
+            episode_reward = 0
+            steps = 0
+            done = False
+            
+            while not done and steps < 1000:
+                action = self.policy[state]
+                state, reward, done, _ = self.env.step(action)
+                episode_reward += reward
+                steps += 1
+            
+            total_rewards.append(episode_reward)
+            total_steps.append(steps)
+            
+            if episode_reward > 0:
+                successes += 1
+        
+        return {
+            'average_reward': np.mean(total_rewards),
+            'std_reward': np.std(total_rewards),
+            'success_rate': successes / num_episodes,
+            'average_steps': np.mean(total_steps),
+            'std_steps': np.std(total_steps)
+        }
+    
+    def get_action(self, state: int) -> int:
+        """
+        Retourne l'action selon la politique apprise.
+        
+        Args:
+            state: État courant
+            
+        Returns:
+            Action à prendre
+        """
+        if self.policy is None:
+            raise ValueError("Aucune politique disponible. Entraînez d'abord l'algorithme.")
+        
+        return self.policy[state]
+    
+    def save(self, filepath: str) -> None:
+        """
+        Sauvegarde le modèle.
+        
+        Args:
+            filepath: Chemin de sauvegarde
+        """
         model_data = {
             'Q': self.Q,
             'policy': self.policy,
-            'gamma': self.gamma,
+            'returns_sum': dict(self.returns_sum),
+            'returns_count': dict(self.returns_count),
             'history': self.history,
-            'returns_sum': self.returns_sum,
-            'returns_count': self.returns_count
+            'gamma': self.gamma
         }
         save_model(model_data, filepath)
         
-    def load(self, filepath: str):
-        """Charge un modèle sauvegardé."""
+    def load(self, filepath: str) -> None:
+        """
+        Charge le modèle.
+        
+        Args:
+            filepath: Chemin du modèle
+        """
         model_data = load_model(filepath)
         self.Q = model_data['Q']
         self.policy = model_data['policy']
-        self.gamma = model_data['gamma']
+        self.returns_sum = defaultdict(float, model_data['returns_sum'])
+        self.returns_count = defaultdict(int, model_data['returns_count'])
         self.history = model_data['history']
-        self.returns_sum = model_data['returns_sum']
-        self.returns_count = model_data['returns_count']
+        self.gamma = model_data['gamma']
 
 
-class OnPolicyFirstVisitMC:
+class OnPolicyMC:
     """
     Implémentation de On-policy First-Visit Monte Carlo.
     
-    Cet algorithme utilise une politique epsilon-greedy et met à jour
-    les valeurs Q seulement pour la première visite de chaque état-action.
+    Cet algorithme utilise une politique epsilon-greedy pour explorer
+    et met à jour la fonction Q et la politique simultanément.
     """
     
-    def __init__(self, env: Any, gamma: float = 0.999999, epsilon: float = 0.1):
+    def __init__(self, env: Any, gamma: float = 1.0, epsilon: float = 0.1):
         """
-        Initialise On-policy First-Visit MC.
+        Initialise On-policy Monte Carlo.
         
         Args:
             env: Environnement
@@ -321,9 +321,11 @@ class OnPolicyFirstVisitMC:
         self.env = env
         self.gamma = gamma
         self.epsilon = epsilon
+        self.initial_epsilon = epsilon
         self.Q = None
-        self.policy = None  # Politique epsilon-greedy sous forme de matrice de probabilités
-        self.returns_counts = None
+        self.policy = None
+        self.returns_sum = {}
+        self.returns_count = {}
         self.history = []
         
         # Initialiser les structures MDP
@@ -336,197 +338,112 @@ class OnPolicyFirstVisitMC:
             # Environnement gym discret
             self.nS = self.env.nS
             self.nA = self.env.nA
+        elif hasattr(self.env, 'observation_space') and hasattr(self.env, 'action_space'):
+            # Environnement gym avec observation/action spaces
+            self.nS = getattr(self.env.observation_space, 'n', 16)
+            self.nA = getattr(self.env.action_space, 'n', 4)
         else:
-            # Environnement générique
-            self.nS = getattr(self.env, 'observation_space', type('obj', (object,), {'n': 16})).n
-            self.nA = getattr(self.env, 'action_space', type('obj', (object,), {'n': 4})).n
+            # Environnement personnalisé - essayer d'obtenir les infos MDP
+            if hasattr(self.env, 'get_mdp_info'):
+                mdp_info = self.env.get_mdp_info()
+                self.nS = len(list(mdp_info['states']))
+                self.nA = len(mdp_info['actions'])
+            else:
+                # Valeurs par défaut
+                self.nS = 16
+                self.nA = 4
         
-        # Initialiser la politique epsilon-greedy uniforme
-        self.policy = (1.0 / self.nA) * np.ones((self.nS, self.nA))
+        # Initialiser Q et politique
+        self.Q = np.zeros((self.nS, self.nA), dtype=float)
+        self.policy = np.zeros(self.nS, dtype=int)
         
-        # Initialiser Q avec des valeurs aléatoires
-        self.Q = np.random.random((self.nS, self.nA))
-        
-        # Compteurs de retours pour calcul des moyennes
-        self.returns_counts = np.zeros((self.nS, self.nA))
-        
-        # Identifier les états terminaux
-        self.terminal_states = []
-        if hasattr(self.env, 'desc'):
-            # Pour FrozenLake par exemple
-            desc = self.env.desc
-            for i in range(desc.shape[0]):
-                for j in range(desc.shape[1]):
-                    if desc[i, j] in [b'H', b'G']:  # Hole ou Goal
-                        self.terminal_states.append(i * desc.shape[1] + j)
-        
-        # Initialiser les probabilités de transition si disponibles
-        if hasattr(self.env, 'P'):
-            self.transition_probs = self._extract_transition_probabilities()
-            self.rewards = self._extract_rewards()
-        else:
-            self.transition_probs = None
-            self.rewards = [0.0, 1.0]
+        # Initialiser les dictionnaires de retours
+        self.returns_sum = defaultdict(float)
+        self.returns_count = defaultdict(int)
     
-    def _extract_transition_probabilities(self):
-        """Extrait les probabilités de transition de l'environnement."""
-        rewards = set()
-        for s in range(self.nS):
-            for a in range(self.nA):
-                if s in self.env.P and a in self.env.P[s]:
-                    for prob, next_state, reward, done in self.env.P[s][a]:
-                        rewards.add(reward)
-        
-        self.rewards = sorted(list(rewards))
-        p = np.zeros((self.nS, self.nA, self.nS, len(self.rewards)))
-        
-        for s in range(self.nS):
-            for a in range(self.nA):
-                if s in self.env.P and a in self.env.P[s]:
-                    for prob, next_state, reward, done in self.env.P[s][a]:
-                        r_idx = self.rewards.index(reward)
-                        p[s, a, next_state, r_idx] = prob
-        
-        return p
-        
-    def _extract_rewards(self):
-        """Extrait la liste des récompenses possibles."""
-        rewards = set()
-        for s in range(self.nS):
-            for a in range(self.nA):
-                if s in self.env.P and a in self.env.P[s]:
-                    for prob, next_state, reward, done in self.env.P[s][a]:
-                        rewards.add(reward)
-        return sorted(list(rewards))
-    
-    def sample_next_state_reward(self, s: int, a: int) -> Tuple[int, float]:
+    def epsilon_greedy_action(self, state: int) -> int:
         """
-        Échantillonne l'état suivant et la récompense.
+        Choisit une action selon la politique epsilon-greedy.
         
         Args:
-            s: État actuel
-            a: Action
+            state: État courant
             
         Returns:
-            Tuple (next_state, reward)
+            Action choisie
         """
-        if self.transition_probs is None:
-            # Fallback pour environnements sans probabilités explicites
-            state = self.env.reset()
-            self.env.unwrapped.s = s
-            next_state, reward, done, _ = self.env.step(a)
-            return next_state, reward
-        
-        # Utiliser les probabilités de transition
-        candidates = []
-        probs = []
-        for s_p in range(self.nS):
-            for r_idx in range(len(self.rewards)):
-                prob = self.transition_probs[s, a, s_p, r_idx]
-                if prob > 0:
-                    candidates.append((s_p, r_idx))
-                    probs.append(prob)
-        
-        if candidates:
-            probs = np.array(probs)
-            probs /= probs.sum()
-            idx = np.random.choice(len(candidates), p=probs)
-            s_p, r_idx = candidates[idx]
-            return s_p, self.rewards[r_idx]
+        if random.random() < self.epsilon:
+            return random.randint(0, self.nA - 1)
         else:
-            return s, 0.0
-        
-    def epsilon_greedy_policy(self, state: int) -> int:
-        """
-        Sélectionne une action selon la politique epsilon-greedy.
-        
-        Args:
-            state: État actuel
-            
-        Returns:
-            Action sélectionnée
-        """
-        all_actions = np.arange(self.nA)
-        return np.random.choice(all_actions, p=self.policy[state])
-        
+            return np.argmax(self.Q[state])
+    
     def generate_episode(self) -> List[Tuple[int, int, float]]:
         """
-        Génère un épisode suivant la politique epsilon-greedy.
+        Génère un épisode en suivant la politique epsilon-greedy.
         
         Returns:
-            Liste des transitions (état, action, reward)
+            Liste des transitions (état, action, récompense)
         """
         episode = []
-        
-        # Démarrer depuis un état aléatoire
-        s = np.random.randint(self.nS)
-        
-        max_steps = 1000  # Protection contre les boucles infinies
+        state = self.env.reset()
+        done = False
         steps = 0
+        max_steps = 1000
         
-        while s not in self.terminal_states and steps < max_steps:
-            # Sélectionner une action selon la politique epsilon-greedy
-            a = self.epsilon_greedy_policy(s)
+        while not done and steps < max_steps:
+            # Choisir une action
+            action = self.epsilon_greedy_action(state)
             
-            # Calculer la récompense et l'état suivant
-            s_next, r = self.sample_next_state_reward(s, a)
-            
-            # Ajouter à l'épisode
-            episode.append((s, a, r))
-            
-            # Passer à l'état suivant
-            s = s_next
-            steps += 1
-            
-            if s in self.terminal_states:
+            # Prendre l'action
+            try:
+                next_state, reward, done, _ = self.env.step(action)
+                episode.append((state, action, reward))
+                state = next_state
+                
+            except Exception as e:
                 break
+            
+            steps += 1
         
         return episode
-        
-    def update_q_values(self, episode: List[Tuple[int, int, float]]):
+    
+    def update_q_function(self, episode: List[Tuple[int, int, float]]) -> None:
         """
-        Met à jour les valeurs Q (first-visit seulement).
+        Met à jour la fonction Q basée sur un épisode.
         
         Args:
-            episode: Liste des transitions (état, action, reward)
+            episode: Liste des transitions (état, action, récompense)
         """
-        # Mettre les valeurs Q des états terminaux à 0
-        for terminal_state in self.terminal_states:
-            self.Q[terminal_state, :] = 0.0
-        
-        G = 0.0
+        # Calculer les retours
+        returns = 0.0
+        visited_pairs = set()
         
         # Parcourir l'épisode en sens inverse
-        for t in reversed(range(len(episode))):
-            s_t, a_t, r_t_plus_1 = episode[t]
+        for i in range(len(episode) - 1, -1, -1):
+            state, action, reward = episode[i]
+            returns = self.gamma * returns + reward
             
-            # Calculer le return
-            G = self.gamma * G + r_t_plus_1
-            
-            # Vérifier si c'est la première visite de (s_t, a_t)
-            first_visit = True
-            for j in range(t):
-                if episode[j][0] == s_t and episode[j][1] == a_t:
-                    first_visit = False
-                    break
-            
-            if first_visit:
-                # Mettre à jour Q avec la moyenne incrémentale
-                self.Q[s_t, a_t] = (self.Q[s_t, a_t] * self.returns_counts[s_t, a_t] + G) / (self.returns_counts[s_t, a_t] + 1)
-                self.returns_counts[s_t, a_t] += 1
+            # First-visit Monte Carlo
+            if (state, action) not in visited_pairs:
+                visited_pairs.add((state, action))
                 
-                # Améliorer la politique (epsilon-greedy)
-                best_a = np.argmax(self.Q[s_t, :])
+                # Mettre à jour les moyennes
+                self.returns_count[(state, action)] += 1
+                self.returns_sum[(state, action)] += returns
                 
-                # Initialiser toutes les actions avec epsilon / num_actions
-                self.policy[s_t, :] = self.epsilon / self.nA
-                
-                # Donner la probabilité maximale à la meilleure action
-                self.policy[s_t, best_a] = 1.0 - self.epsilon + self.epsilon / self.nA
-        
+                # Mettre à jour Q
+                self.Q[state, action] = self.returns_sum[(state, action)] / self.returns_count[(state, action)]
+    
+    def improve_policy(self) -> None:
+        """
+        Améliore la politique basée sur la fonction Q actuelle.
+        """
+        for state in range(self.nS):
+            # Choisir l'action avec la plus haute valeur Q
+            self.policy[state] = np.argmax(self.Q[state])
+    
     def train(self, num_episodes: int = 1000) -> Dict[str, Any]:
         """
-        Entraîne l'algorithme On-policy First-Visit MC.
+        Entraîne l'algorithme On-policy Monte Carlo.
         
         Args:
             num_episodes: Nombre d'épisodes d'entraînement
@@ -536,82 +453,159 @@ class OnPolicyFirstVisitMC:
         """
         self.history = []
         
-        for episode_num in range(1, num_episodes + 1):
+        for episode_num in range(num_episodes):
             # Générer un épisode
             episode = self.generate_episode()
             
-            # Mettre à jour les valeurs Q et la politique
-            self.update_q_values(episode)
-            
-            # Enregistrer les statistiques
-            if episode_num % max(1, num_episodes // 20) == 0 or episode_num == 1:
+            if episode:  # Si l'épisode n'est pas vide
+                # Mettre à jour la fonction Q
+                self.update_q_function(episode)
+                
+                # Améliorer la politique
+                self.improve_policy()
+                
+                # Decay epsilon
+                self.epsilon = max(0.01, self.epsilon * 0.995)
+                
+                # Enregistrer les statistiques
+                episode_reward = sum(reward for _, _, reward in episode)
                 avg_q = np.mean(self.Q)
-                max_q = np.max(self.Q)
-                episode_length = len(episode)
                 
                 self.history.append({
-                    'episode': episode_num,
-                    'avg_q_value': avg_q,
-                    'max_q_value': max_q,
-                    'episode_length': episode_length,
-                    'epsilon': self.epsilon
+                    'episode': episode_num + 1,
+                    'reward': episode_reward,
+                    'avg_q': avg_q,
+                    'epsilon': self.epsilon,
+                    'episode_length': len(episode)
                 })
                 
-                print(f"Épisode {episode_num}/{num_episodes} - Q moyen: {avg_q:.4f}, Longueur: {episode_length}")
+                if (episode_num + 1) % 100 == 0:
+                    print(f"Épisode {episode_num + 1}: Récompense = {episode_reward:.3f}, Epsilon = {self.epsilon:.3f}")
         
         return {
             'Q': self.Q,
             'policy': self.policy,
             'history': self.history,
-            'episodes': num_episodes,
-            'returns_counts': self.returns_counts
+            'returns_sum': dict(self.returns_sum),
+            'returns_count': dict(self.returns_count)
         }
+    
+    def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
+        """
+        Évalue la politique apprise.
         
-    def save(self, filepath: str):
-        """Sauvegarde le modèle."""
+        Args:
+            num_episodes: Nombre d'épisodes d'évaluation
+            
+        Returns:
+            Dictionnaire avec les métriques d'évaluation
+        """
+        if self.policy is None:
+            raise ValueError("Aucune politique disponible. Entraînez d'abord l'algorithme.")
+        
+        total_rewards = []
+        total_steps = []
+        successes = 0
+        
+        for _ in range(num_episodes):
+            state = self.env.reset()
+            episode_reward = 0
+            steps = 0
+            done = False
+            
+            while not done and steps < 1000:
+                action = self.policy[state]
+                state, reward, done, _ = self.env.step(action)
+                episode_reward += reward
+                steps += 1
+            
+            total_rewards.append(episode_reward)
+            total_steps.append(steps)
+            
+            if episode_reward > 0:
+                successes += 1
+        
+        return {
+            'average_reward': np.mean(total_rewards),
+            'std_reward': np.std(total_rewards),
+            'success_rate': successes / num_episodes,
+            'average_steps': np.mean(total_steps),
+            'std_steps': np.std(total_steps)
+        }
+    
+    def get_action(self, state: int) -> int:
+        """
+        Retourne l'action selon la politique apprise.
+        
+        Args:
+            state: État courant
+            
+        Returns:
+            Action à prendre
+        """
+        if self.policy is None:
+            raise ValueError("Aucune politique disponible. Entraînez d'abord l'algorithme.")
+        
+        return self.policy[state]
+    
+    def save(self, filepath: str) -> None:
+        """
+        Sauvegarde le modèle.
+        
+        Args:
+            filepath: Chemin de sauvegarde
+        """
         model_data = {
             'Q': self.Q,
             'policy': self.policy,
-            'gamma': self.gamma,
-            'epsilon': self.epsilon,
+            'returns_sum': dict(self.returns_sum),
+            'returns_count': dict(self.returns_count),
             'history': self.history,
-            'returns_counts': self.returns_counts
+            'gamma': self.gamma,
+            'epsilon': self.epsilon
         }
         save_model(model_data, filepath)
         
-    def load(self, filepath: str):
-        """Charge un modèle sauvegardé."""
+    def load(self, filepath: str) -> None:
+        """
+        Charge le modèle.
+        
+        Args:
+            filepath: Chemin du modèle
+        """
         model_data = load_model(filepath)
         self.Q = model_data['Q']
         self.policy = model_data['policy']
+        self.returns_sum = defaultdict(float, model_data['returns_sum'])
+        self.returns_count = defaultdict(int, model_data['returns_count'])
+        self.history = model_data['history']
         self.gamma = model_data['gamma']
         self.epsilon = model_data['epsilon']
-        self.history = model_data['history']
-        self.returns_counts = model_data['returns_counts']
 
 
 class OffPolicyMC:
     """
-    Implémentation de Off-policy Monte Carlo avec Weighted Importance Sampling.
+    Implémentation de Off-policy Monte Carlo avec Importance Sampling.
     
-    Utilise une politique de comportement uniforme pour générer des épisodes
-    et apprend une politique cible greedy via weighted importance sampling.
+    Cet algorithme utilise une politique de comportement (behavior policy)
+    pour explorer et une politique cible (target policy) pour évaluer.
     """
     
-    def __init__(self, env: Any, gamma: float = 1.0):
+    def __init__(self, env: Any, gamma: float = 1.0, epsilon: float = 0.1):
         """
-        Initialise Off-policy MC.
+        Initialise Off-policy Monte Carlo.
         
         Args:
             env: Environnement
             gamma: Facteur de discount
+            epsilon: Paramètre epsilon-greedy pour la politique de comportement
         """
         self.env = env
         self.gamma = gamma
+        self.epsilon = epsilon
         self.Q = None
-        self.C = None  # Cumulative weights pour weighted importance sampling
-        self.target_policy = None  # Politique cible (greedy)
-        self.behavior_policy = None  # Politique de comportement (uniforme)
+        self.target_policy = None
+        self.C = None  # Cumulative weights
         self.history = []
         
         # Initialiser les structures MDP
@@ -624,208 +618,112 @@ class OffPolicyMC:
             # Environnement gym discret
             self.nS = self.env.nS
             self.nA = self.env.nA
+        elif hasattr(self.env, 'observation_space') and hasattr(self.env, 'action_space'):
+            # Environnement gym avec observation/action spaces
+            self.nS = getattr(self.env.observation_space, 'n', 16)
+            self.nA = getattr(self.env.action_space, 'n', 4)
         else:
-            # Environnement générique
-            self.nS = getattr(self.env, 'observation_space', type('obj', (object,), {'n': 16})).n
-            self.nA = getattr(self.env, 'action_space', type('obj', (object,), {'n': 4})).n
+            # Environnement personnalisé - essayer d'obtenir les infos MDP
+            if hasattr(self.env, 'get_mdp_info'):
+                mdp_info = self.env.get_mdp_info()
+                self.nS = len(list(mdp_info['states']))
+                self.nA = len(mdp_info['actions'])
+            else:
+                # Valeurs par défaut
+                self.nS = 16
+                self.nA = 4
         
-        # Initialiser Q, C et politiques
-        self.Q = np.zeros((self.nS, self.nA), dtype=np.float64)
-        self.C = np.zeros((self.nS, self.nA), dtype=np.float64)  # Poids cumulatifs
-        self.target_policy = np.zeros(self.nS, dtype=int)  # Politique cible (greedy)
-        self.behavior_policy = np.ones((self.nS, self.nA)) / self.nA  # Politique uniforme
-        
-        # Identifier les états terminaux
-        self.terminal_states = []
-        if hasattr(self.env, 'desc'):
-            # Pour FrozenLake par exemple
-            desc = self.env.desc
-            for i in range(desc.shape[0]):
-                for j in range(desc.shape[1]):
-                    if desc[i, j] in [b'H', b'G']:  # Hole ou Goal
-                        self.terminal_states.append(i * desc.shape[1] + j)
-        
-        # Initialiser les probabilités de transition si disponibles
-        if hasattr(self.env, 'P'):
-            self.transition_probs = self._extract_transition_probabilities()
-            self.rewards = self._extract_rewards()
-        else:
-            self.transition_probs = None
-            self.rewards = [0.0, 1.0]
+        # Initialiser Q, politique cible et poids cumulatifs
+        self.Q = np.zeros((self.nS, self.nA), dtype=float)
+        self.target_policy = np.zeros(self.nS, dtype=int)
+        self.C = np.zeros((self.nS, self.nA), dtype=float)
     
-    def _extract_transition_probabilities(self):
-        """Extrait les probabilités de transition de l'environnement."""
-        rewards = set()
-        for s in range(self.nS):
-            for a in range(self.nA):
-                if s in self.env.P and a in self.env.P[s]:
-                    for prob, next_state, reward, done in self.env.P[s][a]:
-                        rewards.add(reward)
-        
-        self.rewards = sorted(list(rewards))
-        p = np.zeros((self.nS, self.nA, self.nS, len(self.rewards)))
-        
-        for s in range(self.nS):
-            for a in range(self.nA):
-                if s in self.env.P and a in self.env.P[s]:
-                    for prob, next_state, reward, done in self.env.P[s][a]:
-                        r_idx = self.rewards.index(reward)
-                        p[s, a, next_state, r_idx] = prob
-        
-        return p
-        
-    def _extract_rewards(self):
-        """Extrait la liste des récompenses possibles."""
-        rewards = set()
-        for s in range(self.nS):
-            for a in range(self.nA):
-                if s in self.env.P and a in self.env.P[s]:
-                    for prob, next_state, reward, done in self.env.P[s][a]:
-                        rewards.add(reward)
-        return sorted(list(rewards))
-    
-    def sample_next_state_reward(self, s: int, a: int) -> Tuple[int, float]:
+    def behavior_policy(self, state: int) -> int:
         """
-        Échantillonne l'état suivant et la récompense.
+        Politique de comportement epsilon-greedy.
         
         Args:
-            s: État actuel
-            a: Action
+            state: État courant
             
         Returns:
-            Tuple (next_state, reward)
+            Action choisie
         """
-        if self.transition_probs is None:
-            # Fallback pour environnements sans probabilités explicites
-            state = self.env.reset()
-            self.env.unwrapped.s = s
-            next_state, reward, done, _ = self.env.step(a)
-            return next_state, reward
-        
-        # Utiliser les probabilités de transition
-        candidates = []
-        probs = []
-        for s_p in range(self.nS):
-            for r_idx in range(len(self.rewards)):
-                prob = self.transition_probs[s, a, s_p, r_idx]
-                if prob > 0:
-                    candidates.append((s_p, r_idx))
-                    probs.append(prob)
-        
-        if candidates:
-            probs = np.array(probs, dtype=np.float64)
-            probs /= probs.sum()
-            idx = np.random.choice(len(candidates), p=probs)
-            s_p, r_idx = candidates[idx]
-            return s_p, self.rewards[r_idx]
+        if random.random() < self.epsilon:
+            return random.randint(0, self.nA - 1)
         else:
-            return s, 0.0
-        
-    def behavior_policy_action(self, state: int) -> int:
-        """
-        Politique de comportement (uniforme).
-        
-        Args:
-            state: État actuel
-            
-        Returns:
-            Action sélectionnée
-        """
-        return np.random.choice(self.nA)
-        
-    def target_policy_action(self, state: int) -> int:
-        """
-        Politique cible (greedy par rapport à Q).
-        
-        Args:
-            state: État actuel
-            
-        Returns:
-            Action sélectionnée
-        """
-        return self.target_policy[state]
-        
+            return np.argmax(self.Q[state])
+    
     def generate_episode(self) -> List[Tuple[int, int, float]]:
         """
-        Génère un épisode avec la politique de comportement uniforme.
+        Génère un épisode en suivant la politique de comportement.
         
         Returns:
-            Liste des transitions (état, action, reward)
+            Liste des transitions (état, action, récompense)
         """
         episode = []
-        
-        # Sélection de l'état initial (non terminal)
-        non_terminal_states = [s for s in range(self.nS) if s not in self.terminal_states]
-        if non_terminal_states:
-            s = np.random.choice(non_terminal_states)
-        else:
-            s = np.random.randint(self.nS)
-        
-        max_steps = 1000  # Protection contre les boucles infinies
+        state = self.env.reset()
+        done = False
         steps = 0
+        max_steps = 1000
         
-        # Tant que non terminal
-        while s not in self.terminal_states and steps < max_steps:
-            # Choix aléatoire pour la politique de comportement (uniforme)
-            a = self.behavior_policy_action(s)
+        while not done and steps < max_steps:
+            # Choisir une action selon la politique de comportement
+            action = self.behavior_policy(state)
             
-            # Transition
-            s_next, r = self.sample_next_state_reward(s, a)
-            episode.append((s, a, r))
-            
-            s = s_next
-            steps += 1
-            
-            if s in self.terminal_states:
+            # Prendre l'action
+            try:
+                next_state, reward, done, _ = self.env.step(action)
+                episode.append((state, action, reward))
+                state = next_state
+                
+            except Exception as e:
                 break
+            
+            steps += 1
         
         return episode
-        
-    def update_q_values(self, episode: List[Tuple[int, int, float]]):
+    
+    def update_q_function(self, episode: List[Tuple[int, int, float]]) -> None:
         """
-        Met à jour les valeurs Q avec weighted importance sampling.
+        Met à jour la fonction Q avec importance sampling.
         
         Args:
-            episode: Liste des transitions (état, action, reward)
+            episode: Liste des transitions (état, action, récompense)
         """
-        if not episode:
-            return
-            
-        # Calcul des retours G_t et pondération W (weighted importance sampling)
         G = 0.0
         W = 1.0
         
-        # Parcourir l'épisode à l'envers
-        for t in range(len(episode) - 1, -1, -1):
-            s_t, a_t, r_t_plus_1 = episode[t]
+        # Parcourir l'épisode en sens inverse
+        for i in range(len(episode) - 1, -1, -1):
+            state, action, reward = episode[i]
+            G = self.gamma * G + reward
             
-            # Calculer le return
-            G = self.gamma * G + r_t_plus_1
+            # Mettre à jour C et Q
+            self.C[state, action] += W
+            self.Q[state, action] += (W / self.C[state, action]) * (G - self.Q[state, action])
             
-            # Mettre à jour C et Q pour (s_t, a_t) avec weighted importance sampling
-            self.C[s_t, a_t] += W
-            if self.C[s_t, a_t] > 0:
-                self.Q[s_t, a_t] += (W / self.C[s_t, a_t]) * (G - self.Q[s_t, a_t])
+            # Mettre à jour la politique cible (greedy)
+            self.target_policy[state] = np.argmax(self.Q[state])
             
-            # Mettre à jour la politique cible : greedy w.r.t Q[s_t]
-            self.target_policy[s_t] = int(np.argmax(self.Q[s_t, :]))
+            # Si l'action n'est pas celle de la politique cible, arrêter
+            if action != self.target_policy[state]:
+                break
             
-            # Calculer le ratio d'importance sampling pour la prochaine étape
-            # Politique de comportement : uniforme (probabilité 1/nA)
-            # Politique cible : déterministe (probabilité 1 si action = target_policy[s_t], 0 sinon)
-            behavior_prob = 1.0 / self.nA
-            target_prob = 1.0 if a_t == self.target_policy[s_t] else 0.0
+            # Mettre à jour le poids d'importance
+            # Probabilité de la politique cible (déterministe)
+            target_prob = 1.0
             
-            # Si la politique cible ne sélectionnerait pas cette action, W devient 0
-            if target_prob == 0.0:
-                break  # W deviendrait 0, on arrête la boucle
+            # Probabilité de la politique de comportement (epsilon-greedy)
+            if action == np.argmax(self.Q[state]):
+                behavior_prob = 1.0 - self.epsilon + self.epsilon / self.nA
+            else:
+                behavior_prob = self.epsilon / self.nA
             
-            # Mise à jour du poids W
             W *= target_prob / behavior_prob
-        
+    
     def train(self, num_episodes: int = 1000) -> Dict[str, Any]:
         """
-        Entraîne l'algorithme Off-policy MC.
+        Entraîne l'algorithme Off-policy Monte Carlo.
         
         Args:
             num_episodes: Nombre d'épisodes d'entraînement
@@ -835,56 +733,121 @@ class OffPolicyMC:
         """
         self.history = []
         
-        for episode_num in range(1, num_episodes + 1):
-            # Générer un épisode avec la politique de comportement
+        for episode_num in range(num_episodes):
+            # Générer un épisode
             episode = self.generate_episode()
             
-            # Mettre à jour les valeurs Q et la politique cible
-            self.update_q_values(episode)
-            
-            # Enregistrer les statistiques
-            if episode_num % max(1, num_episodes // 20) == 0 or episode_num == 1:
+            if episode:  # Si l'épisode n'est pas vide
+                # Mettre à jour la fonction Q
+                self.update_q_function(episode)
+                
+                # Enregistrer les statistiques
+                episode_reward = sum(reward for _, _, reward in episode)
                 avg_q = np.mean(self.Q)
-                max_q = np.max(self.Q)
-                episode_length = len(episode)
                 
                 self.history.append({
-                    'episode': episode_num,
-                    'avg_q_value': avg_q,
-                    'max_q_value': max_q,
-                    'episode_length': episode_length,
-                    'cumulative_weights_sum': np.sum(self.C)
+                    'episode': episode_num + 1,
+                    'reward': episode_reward,
+                    'avg_q': avg_q,
+                    'episode_length': len(episode)
                 })
                 
-                print(f"Épisode {episode_num}/{num_episodes} - Q moyen: {avg_q:.4f}, Longueur: {episode_length}")
+                if (episode_num + 1) % 100 == 0:
+                    print(f"Épisode {episode_num + 1}: Récompense = {episode_reward:.3f}, Q moyen = {avg_q:.6f}")
         
         return {
             'Q': self.Q,
-            'target_policy': self.target_policy,
-            'behavior_policy': self.behavior_policy,
-            'C': self.C,
+            'policy': self.target_policy,
             'history': self.history,
-            'episodes': num_episodes
+            'C': self.C
         }
+    
+    def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
+        """
+        Évalue la politique cible apprise.
         
-    def save(self, filepath: str):
-        """Sauvegarde le modèle."""
+        Args:
+            num_episodes: Nombre d'épisodes d'évaluation
+            
+        Returns:
+            Dictionnaire avec les métriques d'évaluation
+        """
+        if self.target_policy is None:
+            raise ValueError("Aucune politique disponible. Entraînez d'abord l'algorithme.")
+        
+        total_rewards = []
+        total_steps = []
+        successes = 0
+        
+        for _ in range(num_episodes):
+            state = self.env.reset()
+            episode_reward = 0
+            steps = 0
+            done = False
+            
+            while not done and steps < 1000:
+                action = self.target_policy[state]
+                state, reward, done, _ = self.env.step(action)
+                episode_reward += reward
+                steps += 1
+            
+            total_rewards.append(episode_reward)
+            total_steps.append(steps)
+            
+            if episode_reward > 0:
+                successes += 1
+        
+        return {
+            'average_reward': np.mean(total_rewards),
+            'std_reward': np.std(total_rewards),
+            'success_rate': successes / num_episodes,
+            'average_steps': np.mean(total_steps),
+            'std_steps': np.std(total_steps)
+        }
+    
+    def get_action(self, state: int) -> int:
+        """
+        Retourne l'action selon la politique cible apprise.
+        
+        Args:
+            state: État courant
+            
+        Returns:
+            Action à prendre
+        """
+        if self.target_policy is None:
+            raise ValueError("Aucune politique disponible. Entraînez d'abord l'algorithme.")
+        
+        return self.target_policy[state]
+    
+    def save(self, filepath: str) -> None:
+        """
+        Sauvegarde le modèle.
+        
+        Args:
+            filepath: Chemin de sauvegarde
+        """
         model_data = {
             'Q': self.Q,
-            'C': self.C,
             'target_policy': self.target_policy,
-            'behavior_policy': self.behavior_policy,
+            'C': self.C,
+            'history': self.history,
             'gamma': self.gamma,
-            'history': self.history
+            'epsilon': self.epsilon
         }
         save_model(model_data, filepath)
         
-    def load(self, filepath: str):
-        """Charge un modèle sauvegardé."""
+    def load(self, filepath: str) -> None:
+        """
+        Charge le modèle.
+        
+        Args:
+            filepath: Chemin du modèle
+        """
         model_data = load_model(filepath)
         self.Q = model_data['Q']
-        self.C = model_data['C']
         self.target_policy = model_data['target_policy']
-        self.behavior_policy = model_data['behavior_policy']
+        self.C = model_data['C']
+        self.history = model_data['history']
         self.gamma = model_data['gamma']
-        self.history = model_data['history'] 
+        self.epsilon = model_data['epsilon'] 

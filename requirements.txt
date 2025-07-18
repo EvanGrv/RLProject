@@ -71,8 +71,7 @@ pathlib2>=2.3.0;python_version<"3.4"
 # CONTRAINTES DE VERSIONS
 # =============================================================================
 
-# Python 3.7+ requis
-python_requires>=3.7
+# Python 3.7+ requis (spécifié dans setup.py)
 
 # =============================================================================
 # DÉPENDANCES OPTIONNELLES
