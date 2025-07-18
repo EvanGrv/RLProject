@@ -22,8 +22,10 @@ class TestSarsa:
     def setup_method(self):
         """Configuration pour chaque test."""
         self.env = Mock()
+        self.env.observation_space = Mock()
+        self.env.observation_space.n = 10  # Nombre d'états
         self.env.action_space = Mock()
-        self.env.action_space.n = 4
+        self.env.action_space.n = 4  # Nombre d'actions
         
         self.sarsa = Sarsa(
             env=self.env,
@@ -38,7 +40,7 @@ class TestSarsa:
         assert self.sarsa.alpha == 0.1
         assert self.sarsa.gamma == 0.9
         assert self.sarsa.epsilon == 0.1
-        assert len(self.sarsa.Q) == 0
+        assert self.sarsa.Q.shape == (10, 4)  # nS x nA
         assert self.sarsa.policy is None
         assert self.sarsa.history == []
     
@@ -100,8 +102,10 @@ class TestQLearning:
     def setup_method(self):
         """Configuration pour chaque test."""
         self.env = Mock()
+        self.env.observation_space = Mock()
+        self.env.observation_space.n = 10  # Nombre d'états
         self.env.action_space = Mock()
-        self.env.action_space.n = 4
+        self.env.action_space.n = 4  # Nombre d'actions
         
         self.q_learning = QLearning(
             env=self.env,
@@ -116,7 +120,7 @@ class TestQLearning:
         assert self.q_learning.alpha == 0.1
         assert self.q_learning.gamma == 0.9
         assert self.q_learning.epsilon == 0.1
-        assert len(self.q_learning.Q) == 0
+        assert self.q_learning.Q.shape == (10, 4)  # nS x nA
         assert self.q_learning.policy is None
         assert self.q_learning.history == []
     
@@ -152,8 +156,10 @@ class TestExpectedSarsa:
     def setup_method(self):
         """Configuration pour chaque test."""
         self.env = Mock()
+        self.env.observation_space = Mock()
+        self.env.observation_space.n = 10  # Nombre d'états
         self.env.action_space = Mock()
-        self.env.action_space.n = 4
+        self.env.action_space.n = 4  # Nombre d'actions
         
         self.expected_sarsa = ExpectedSarsa(
             env=self.env,
@@ -168,7 +174,7 @@ class TestExpectedSarsa:
         assert self.expected_sarsa.alpha == 0.1
         assert self.expected_sarsa.gamma == 0.9
         assert self.expected_sarsa.epsilon == 0.1
-        assert len(self.expected_sarsa.Q) == 0
+        assert self.expected_sarsa.Q.shape == (10, 4)  # nS x nA
         assert self.expected_sarsa.policy is None
         assert self.expected_sarsa.history == []
     
@@ -204,6 +210,8 @@ class TestIntegration:
     def test_algorithms_have_same_interface(self):
         """Test que les algorithmes ont une interface similaire."""
         env = Mock()
+        env.observation_space = Mock()
+        env.observation_space.n = 10
         env.action_space = Mock()
         env.action_space.n = 4
         
@@ -226,6 +234,8 @@ class TestIntegration:
     def test_different_alpha_values(self):
         """Test avec différentes valeurs d'alpha."""
         env = Mock()
+        env.observation_space = Mock()
+        env.observation_space.n = 10
         env.action_space = Mock()
         env.action_space.n = 4
         
@@ -238,6 +248,8 @@ class TestIntegration:
     def test_different_epsilon_values(self):
         """Test avec différentes valeurs d'epsilon."""
         env = Mock()
+        env.observation_space = Mock()
+        env.observation_space.n = 10
         env.action_space = Mock()
         env.action_space.n = 4
         
@@ -250,6 +262,8 @@ class TestIntegration:
     def test_different_gamma_values(self):
         """Test avec différentes valeurs de gamma."""
         env = Mock()
+        env.observation_space = Mock()
+        env.observation_space.n = 10
         env.action_space = Mock()
         env.action_space.n = 4
         

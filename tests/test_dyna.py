@@ -21,8 +21,10 @@ class TestDynaQ:
     def setup_method(self):
         """Configuration pour chaque test."""
         self.env = Mock()
+        self.env.observation_space = Mock()
+        self.env.observation_space.n = 10  # Nombre d'états
         self.env.action_space = Mock()
-        self.env.action_space.n = 4
+        self.env.action_space.n = 4  # Nombre d'actions
         
         self.dyna_q = DynaQ(
             env=self.env,
@@ -39,7 +41,7 @@ class TestDynaQ:
         assert self.dyna_q.gamma == 0.9
         assert self.dyna_q.epsilon == 0.1
         assert self.dyna_q.n_planning == 5
-        assert len(self.dyna_q.Q) == 0
+        assert self.dyna_q.Q.shape == (10, 4)  # nS x nA
         assert len(self.dyna_q.model) == 0
         assert len(self.dyna_q.visited_states) == 0
         assert self.dyna_q.policy is None
@@ -121,8 +123,10 @@ class TestDynaQPlus:
     def setup_method(self):
         """Configuration pour chaque test."""
         self.env = Mock()
+        self.env.observation_space = Mock()
+        self.env.observation_space.n = 10  # Nombre d'états
         self.env.action_space = Mock()
-        self.env.action_space.n = 4
+        self.env.action_space.n = 4  # Nombre d'actions
         
         self.dyna_q_plus = DynaQPlus(
             env=self.env,
@@ -141,9 +145,9 @@ class TestDynaQPlus:
         assert self.dyna_q_plus.epsilon == 0.1
         assert self.dyna_q_plus.n_planning == 5
         assert self.dyna_q_plus.kappa == 0.001
-        assert len(self.dyna_q_plus.Q) == 0
+        assert self.dyna_q_plus.Q.shape == (10, 4)  # nS x nA
         assert len(self.dyna_q_plus.model) == 0
-        assert len(self.dyna_q_plus.time_since_visit) == 0
+        assert len(self.dyna_q_plus.last_visit) == 0
         assert self.dyna_q_plus.current_time == 0
         assert self.dyna_q_plus.policy is None
         assert self.dyna_q_plus.history == []
@@ -233,6 +237,8 @@ class TestIntegration:
     def test_algorithms_have_same_interface(self):
         """Test que les algorithmes ont une interface similaire."""
         env = Mock()
+        env.observation_space = Mock()
+        env.observation_space.n = 10
         env.action_space = Mock()
         env.action_space.n = 4
         
@@ -257,6 +263,8 @@ class TestIntegration:
     def test_different_n_planning_values(self):
         """Test avec différentes valeurs de n_planning."""
         env = Mock()
+        env.observation_space = Mock()
+        env.observation_space.n = 10
         env.action_space = Mock()
         env.action_space.n = 4
         
@@ -269,6 +277,8 @@ class TestIntegration:
     def test_different_kappa_values(self):
         """Test avec différentes valeurs de kappa pour Dyna-Q+."""
         env = Mock()
+        env.observation_space = Mock()
+        env.observation_space.n = 10
         env.action_space = Mock()
         env.action_space.n = 4
         
@@ -281,6 +291,8 @@ class TestIntegration:
     def test_dyna_q_plus_has_additional_attributes(self):
         """Test que Dyna-Q+ a les attributs supplémentaires."""
         env = Mock()
+        env.observation_space = Mock()
+        env.observation_space.n = 10
         env.action_space = Mock()
         env.action_space.n = 4
         
@@ -289,13 +301,13 @@ class TestIntegration:
         
         # Dyna-Q+ a des attributs supplémentaires
         assert hasattr(dyna_q_plus, 'kappa')
-        assert hasattr(dyna_q_plus, 'time_since_visit')
+        assert hasattr(dyna_q_plus, 'last_visit')
         assert hasattr(dyna_q_plus, 'current_time')
         assert hasattr(dyna_q_plus, 'exploration_bonus')
         
         # Dyna-Q n'a pas ces attributs
         assert not hasattr(dyna_q, 'kappa')
-        assert not hasattr(dyna_q, 'time_since_visit')
+        assert not hasattr(dyna_q, 'last_visit')
         assert not hasattr(dyna_q, 'current_time')
         assert not hasattr(dyna_q, 'exploration_bonus')
 

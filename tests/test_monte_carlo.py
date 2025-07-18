@@ -22,21 +22,21 @@ class TestMonteCarloES:
     def setup_method(self):
         """Configuration pour chaque test."""
         self.env = Mock()
+        self.env.observation_space = Mock()
+        self.env.observation_space.n = 10  # Nombre d'états
         self.env.action_space = Mock()
-        self.env.action_space.n = 4
+        self.env.action_space.n = 4  # Nombre d'actions
         
         self.mc_es = MonteCarloES(
             env=self.env,
-            gamma=0.9,
-            epsilon=0.1
+            gamma=0.9
         )
     
     def test_init(self):
         """Test de l'initialisation."""
         assert self.mc_es.env == self.env
         assert self.mc_es.gamma == 0.9
-        assert self.mc_es.epsilon == 0.1
-        assert len(self.mc_es.Q) == 0
+        assert self.mc_es.Q.shape == (10, 4)  # nS x nA
         assert len(self.mc_es.returns) == 0
         assert self.mc_es.policy is None
         assert self.mc_es.history == []
@@ -99,8 +99,10 @@ class TestOnPolicyFirstVisitMC:
     def setup_method(self):
         """Configuration pour chaque test."""
         self.env = Mock()
+        self.env.observation_space = Mock()
+        self.env.observation_space.n = 10  # Nombre d'états
         self.env.action_space = Mock()
-        self.env.action_space.n = 4
+        self.env.action_space.n = 4  # Nombre d'actions
         
         self.on_policy_mc = OnPolicyFirstVisitMC(
             env=self.env,
@@ -113,9 +115,9 @@ class TestOnPolicyFirstVisitMC:
         assert self.on_policy_mc.env == self.env
         assert self.on_policy_mc.gamma == 0.9
         assert self.on_policy_mc.epsilon == 0.1
-        assert len(self.on_policy_mc.Q) == 0
+        assert self.on_policy_mc.Q.shape == (10, 4)  # nS x nA
         assert len(self.on_policy_mc.returns) == 0
-        assert self.on_policy_mc.policy is None
+        assert self.on_policy_mc.policy.shape == (10, 4)  # nS x nA (politique stochastique)
         assert self.on_policy_mc.history == []
     
     def test_epsilon_greedy_policy_stub(self):
@@ -146,24 +148,24 @@ class TestOffPolicyMC:
     def setup_method(self):
         """Configuration pour chaque test."""
         self.env = Mock()
+        self.env.observation_space = Mock()
+        self.env.observation_space.n = 10  # Nombre d'états
         self.env.action_space = Mock()
-        self.env.action_space.n = 4
+        self.env.action_space.n = 4  # Nombre d'actions
         
         self.off_policy_mc = OffPolicyMC(
             env=self.env,
-            gamma=0.9,
-            epsilon=0.1
+            gamma=0.9
         )
     
     def test_init(self):
         """Test de l'initialisation."""
         assert self.off_policy_mc.env == self.env
         assert self.off_policy_mc.gamma == 0.9
-        assert self.off_policy_mc.epsilon == 0.1
-        assert len(self.off_policy_mc.Q) == 0
-        assert len(self.off_policy_mc.C) == 0
-        assert self.off_policy_mc.target_policy is None
-        assert self.off_policy_mc.behavior_policy is None
+        assert self.off_policy_mc.Q.shape == (10, 4)  # nS x nA
+        assert self.off_policy_mc.C.shape == (10, 4)  # nS x nA
+        assert self.off_policy_mc.target_policy.shape == (10,)  # nS (déterministe)
+        assert self.off_policy_mc.behavior_policy.shape == (10, 4)  # nS x nA (stochastique)
         assert self.off_policy_mc.history == []
     
     def test_behavior_policy_action_stub(self):
@@ -239,6 +241,8 @@ class TestIntegration:
     def test_algorithms_have_same_interface(self):
         """Test que les algorithmes ont une interface similaire."""
         env = Mock()
+        env.observation_space = Mock()
+        env.observation_space.n = 10
         env.action_space = Mock()
         env.action_space.n = 4
         
@@ -259,18 +263,23 @@ class TestIntegration:
     def test_different_epsilon_values(self):
         """Test avec différentes valeurs d'epsilon."""
         env = Mock()
+        env.observation_space = Mock()
+        env.observation_space.n = 10
         env.action_space = Mock()
         env.action_space.n = 4
         
-        mc_01 = MonteCarloES(env, epsilon=0.1)
-        mc_05 = MonteCarloES(env, epsilon=0.5)
+        # MonteCarloES n'a pas de paramètre epsilon
+        mc_09 = MonteCarloES(env, gamma=0.9)
+        mc_099 = MonteCarloES(env, gamma=0.99)
         
-        assert mc_01.epsilon == 0.1
-        assert mc_05.epsilon == 0.5
+        assert mc_09.gamma == 0.9
+        assert mc_099.gamma == 0.99
     
     def test_different_gamma_values(self):
         """Test avec différentes valeurs de gamma."""
         env = Mock()
+        env.observation_space = Mock()
+        env.observation_space.n = 10
         env.action_space = Mock()
         env.action_space.n = 4
         
