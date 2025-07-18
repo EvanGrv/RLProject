@@ -266,6 +266,6 @@ Ce projet est sous licence MIT - voir le fichier LICENSE pour plus de détails.
 
 ## 🙏 Remerciements
 
-- Professeurs et encadrants du cours de Deep Learning
+- M.Vidal, professeurs et encadrants du cours de Deep Learning
 - Communauté OpenAI Gym
 - Sutton & Barto pour leur livre référence 
