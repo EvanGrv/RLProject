@@ -35,16 +35,6 @@ class BaseEnvironment(ABC):
 
 
 class LineWorld(BaseEnvironment):
-    """
-    Line World Environment
-    
-    L'agent doit se déplacer sur une ligne et collecter des récompenses.
-    L'agent peut se déplacer vers la gauche ou la droite.
-    L'agent reçoit une récompense de -1.0 si il se déplace vers la gauche 
-    L'agent recoit une récompense de 1.0 si il se déplace vers la droite.
-    L'agent reçoit une récompense de 0.0 si il se déplace vers le milieu de la ligne.
-    """
-    
     def __init__(self, length=8):
         self.length = length
         self.start = length // 2
@@ -63,45 +53,44 @@ class LineWorld(BaseEnvironment):
         self.visited_states = set()
         self.episode_history = []
 
+
     def reset(self):
-        """Réinitialisation de l'environnement"""
+        # Réinitialisation de l'environnement
         self.state = self.start
         return self.state
 
+
     def step(self, action, is_dynamic_programming=False):
-        """Exécute une action dans l'environnement"""
         current_state = self.state
-    
-        # Calcul du prochain état
+        
+        # 1. Calcul du prochain état
         if action == 0:  # Gauche
-            reward = -1.0
             next_state = max(0, self.state - 1)
         else:  # Droite
-            reward = 1.0
             next_state = min(self.length-1, self.state + 1)
 
-        # Vérification du milieu APRÈS le calcul du next_state
-        if next_state == self.length // 2:
+        # 2. Calcul de la récompense selon la logique de l'exemple
+        if next_state in self.terminals:  # État terminal atteint
+            if next_state == 0:  # Terminal gauche
+                reward = -1.0
+            else:  # Terminal droit (length-1)
+                reward = 1.0
+        else:  # Déplacement normal
             reward = 0.0
-
+            
         done = next_state in self.terminals
         self.state = next_state
-
-        if is_dynamic_programming:
-            return {
-                'state': self.state,
-                'previous_state': current_state,
-                'action': action
-            }, reward, done
-        else:
-            return next_state, reward, done, {
-                'action_name': 'gauche' if action == 0 else 'droite',
-                'position': self.state,
-                'previous_position': current_state
-            }
+        
+        return next_state, reward, done, {
+            'action_name': 'gauche' if action == 0 else 'droite',
+            'position': self.state,
+            'previous_position': current_state
+        }
+    
 
     def visualisation(self):
-        """Visualisation de l'environnement"""
+        # Visualisation de notre environnement
+        # une visualisation simple de l'environnement
         print("\n" + "="*40)
         line = ["[ ]"] * self.length
         line[self.state] = "[A]"  # Position de l'agent
@@ -114,51 +103,72 @@ class LineWorld(BaseEnvironment):
         print(" ".join(indices))
         print("="*40)
 
+
     def _build_transition_matrix(self):
-        """Construit la matrice de transition P(s'|s,a)"""
+        # Construit la matrice de transition P(s'|s,a).
+        # Cette méthode est utilisée uniquement par les algorithmes de programmation dynamique.
         P = np.zeros((self.length, len(self.actions), self.length))
         
         for s in range(self.length):
+            if s in self.terminals:
+                # Les états terminaux n'ont pas de transitions
+                continue
+            
             # Action gauche (0)
+            # on ne peut pas aller à gauche si on est à l'état 0
+            # P[s, 0, next_s] retourne la probabilité de transition de l'état s à l'état next_s
+            # en effectuant l'action gauche
             next_s = max(0, s - 1)
             P[s, 0, next_s] = 1.0
             
             # Action droite (1)
+            # on ne peut pas aller à droite si on est à l'état terminal
+            # P[s, 1, next_s] retourne la probabilité de transition de l'état s à l'état next_s
+            # en effectuant l'action droite
             next_s = min(self.length-1, s+1)
             P[s, 1, next_s] = 1.0
             
         return P
 
     def _build_reward_matrix(self):
-        """Construit la matrice de récompense R(s,a)"""
+        # Construit la matrice de récompense R(s,a).
+        # Cette méthode est utilisée uniquement par les algorithmes de programmation dynamique.
         R = np.zeros((self.length, len(self.actions)))
         
         for s in range(self.length):
-            # Action gauche
+            # Action gauche (0)
             next_s_left = max(0, s-1)
-            if next_s_left in self.terminals:
-                R[s, 0] = 1.0
-
+            if next_s_left == 0:  # Si on atteint le terminal gauche
+                R[s, 0] = -1.0
+            
             # Action droite (1)
             next_s_right = min(self.length-1, s+1)
-            if next_s_right in self.terminals:
+            if next_s_right == self.length-1:  # Si on atteint le terminal droit
                 R[s, 1] = 1.0
                 
         return R
 
+
+    # Méthodes pour les algorithmes de programmation dynamique
     def get_mdp_info(self):
-        """Retourne les informations du MDP"""
+        # Retourne les informations du MDP
+        # Cette méthode est utilisée uniquement par les algorithmes de programmation dynamique.
         return {
             'states': range(self.length),
             'actions': self.actions,
             'transition_matrix': self._transition_matrix,
             'reward_matrix': self._reward_matrix,
             'terminals': self.terminals,
-            'gamma': 0.99
+            'gamma': 0.99  
+            # nous optons pour un facteur d'actualisation de 0.99
+            # parce que c'est un facteur d'actualisation assez élevé
+            # la nature de notre environnement est telle que le risque de
+            # divergence est très très faible.
         }
     
+
     def jeu_manuel(self):
-        """Permet à un utilisateur de jouer contre l'environnement"""
+        # Cette méthode permet à un utilisateur de jouer contre l'environnement
         self.reset()
         print("\n=== Line World ===")
         print("Actions: 0 (gauche) ou 1 (droite)")
@@ -177,16 +187,17 @@ class LineWorld(BaseEnvironment):
                 print("Entrée invalide! Entrez un nombre")
                 continue
                 
-            next_state, reward, done, info = self.step(action)
+            next_state, reward, done = self.step(action)
             print(f"Récompense: {reward}")
             
             if done:
                 self.visualisation()
                 print("Terminal atteint!")
                 break
+
     
     def get_metrics(self):
-        """Retourne les métriques de performance"""
+        # Retourne les métriques de performance
         return {
             'current_state': self.state,
             'episode': self.episode_count,
@@ -199,8 +210,14 @@ class LineWorld(BaseEnvironment):
             'episode_history': self.episode_history
         }
 
+
     def replay(self, strategy, delay=1):
-        """Rejoue une séquence d'actions pas à pas"""
+        """Rejoue une séquence d'actions pas à pas.
+        
+        Args:
+            strategy (list): Liste d'actions (0: gauche, 1: droite)
+            delay (int): Délai en secondes entre chaque action (par défaut 1s)
+        """
         import time
         
         if not strategy:
