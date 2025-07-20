@@ -1,0 +1,5 @@
+Environnement,États,Actions,Complexité,Longueur Épisode,Score Moyen,Difficulté,Épisodes Requis,Temps (min),Hidden Size,Learning Rate
+SecretEnv0,8192,3,COMPLEXE,63.0,-4.36,FACILE,"3,096",32.5,512,0.001
+SecretEnv1,65536,3,TRES_COMPLEXE,255.0,-16.00,FACILE,"98,304",4177.9,512,0.001
+SecretEnv2,2097152,3,TRES_COMPLEXE,255.0,-58.94,FACILE,"3,145,728",133693.4,512,0.001
+SecretEnv3,65536,3,TRES_COMPLEXE,255.0,-19.44,FACILE,"98,304",4177.9,512,0.001
