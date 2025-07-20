@@ -19,613 +19,391 @@ from src.utils_io import save_model, load_model
 
 class DynaQ:
     """
-    Implémentation de l'algorithme Dyna-Q.
-    
-    Dyna-Q combine Q-Learning avec la planification en utilisant
-    un modèle appris de l'environnement pour générer des expériences
-    simulées supplémentaires.
+    Dyna-Q (Sutton & Barto, Alg. 8.3).
+
+    Combinaison de Q-Learning off-policy et de planification via un modèle
+    de transitions apprise en ligne (one‐step model).
     """
-    
-    def __init__(self, env: Any, alpha: float = 0.1, gamma: float = 0.95, 
-                 epsilon: float = 0.1, n_planning: int = 5):
+
+    def __init__(
+        self,
+        env: Any,
+        alpha: float      = 0.1,
+        gamma: float      = 0.95,
+        epsilon: float    = 0.1,
+        planning_steps: int = 5
+    ):
         """
-        Initialise Dyna-Q.
-        
         Args:
-            env: Environnement
-            alpha: Taux d'apprentissage
-            gamma: Facteur de discount
-            epsilon: Paramètre epsilon-greedy
-            n_planning: Nombre d'étapes de planification par mise à jour
+          env           : Environnement Gym-like
+          alpha         : taux d'apprentissage α
+          gamma         : facteur d'actualisation γ
+          epsilon       : paramètre ε pour ε-greedy
+          planning_steps: nombre d'updates de planification par pas réel
         """
-        self.env = env
-        self.alpha = alpha
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.n_planning = n_planning
-        
-        # Détection du type d'environnement
-        if hasattr(env, 'observation_space') and hasattr(env, 'action_space'):
-            # Environnement Gym
+        self.env           = env
+        self.alpha         = alpha
+        self.gamma         = gamma
+        self.epsilon       = epsilon
+        self.initial_epsilon = epsilon
+        self.planning_steps = planning_steps
+
+        # Détection de nS et nA
+        if hasattr(env, 'nS') and hasattr(env, 'nA'):
+            self.nS, self.nA = env.nS, env.nA
+        else:
             self.nS = env.observation_space.n
             self.nA = env.action_space.n
-        else:
-            # Environnement personnalisé
-            self.nS = getattr(env, 'nS', getattr(env, 'length', 100))
-            self.nA = getattr(env, 'nA', 2)
-        
-        # Table Q et modèle de l'environnement
-        self.Q = np.zeros((self.nS, self.nA))
-        self.model = {}  # model[(state, action)] = (next_state, reward)
-        self.visited_states = set()
-        self.state_action_pairs = []
-        
-        self.policy = None
-        self.history = []
-        
-    def epsilon_greedy_policy(self, state: int) -> int:
-        """
-        Politique epsilon-greedy.
-        
-        Args:
-            state: État actuel
-            
-        Returns:
-            Action sélectionnée
-        """
+
+        # Table Q et modèle one-step
+        self.Q     = np.zeros((self.nS, self.nA), dtype=float)
+        self.model: Dict[Tuple[int,int], Tuple[int,float]] = {}
+        self.sa_pairs: List[Tuple[int,int]] = []
+
+        # Pour le suivi
+        self.policy: np.ndarray = np.zeros(self.nS, dtype=int)
+        self.history: List[Dict[str, float]] = []
+
+    def epsilon_greedy(self, s: int) -> int:
+        """ε-greedy avec tie-breaking aléatoire."""
         if random.random() < self.epsilon:
-            return random.randint(0, self.nA - 1)
-        else:
-            return int(np.argmax(self.Q[state]))
-        
-    def update_model(self, state: int, action: int, next_state: int, reward: float):
+            return random.randrange(self.nA)
+        q_s = self.Q[s]
+        best = np.flatnonzero(q_s == q_s.max())
+        return int(random.choice(best))
+
+    def q_update(self, s: int, a: int, r: float, s2: int):
         """
-        Met à jour le modèle de l'environnement.
-        
-        Args:
-            state: État actuel
-            action: Action prise
-            next_state: État suivant observé
-            reward: Récompense observée
+        Q-Learning update (experience réelle ou simulée) :
+          Q(s,a) ← Q(s,a) + α [ r + γ max_a' Q(s2,a') − Q(s,a) ].
         """
-        self.model[(state, action)] = (reward, next_state)
-        self.visited_states.add(state)
-        
-        # Maintenir la liste des paires état-action pour la planification
-        if (state, action) not in self.state_action_pairs:
-            self.state_action_pairs.append((state, action))
-        
-    def update_q_value(self, state: int, action: int, reward: float, next_state: int):
+        target = r + self.gamma * np.max(self.Q[s2])
+        self.Q[s,a] += self.alpha * (target - self.Q[s,a])
+
+    def update_model(self, s: int, a: int, r: float, s2: int):
         """
-        Met à jour la valeur Q selon l'équation Q-Learning.
-        
-        Args:
-            state: État actuel
-            action: Action prise
-            reward: Récompense reçue
-            next_state: État suivant
+        Stocke la dernière transition pour (s,a).
+        One-step model : (s,a) → (s2,r).
         """
-        # Q-learning update
-        target = reward + self.gamma * np.max(self.Q[next_state])
-        self.Q[state, action] += self.alpha * (target - self.Q[state, action])
-        
-    def planning_step(self):
+        if (s,a) not in self.model:
+            self.sa_pairs.append((s,a))
+        self.model[(s,a)] = (s2, r)
+
+    def planning(self):
+        """Effectue plusieurs itérations de Q-update simulées via le modèle."""
+        for _ in range(self.planning_steps):
+            s,a = random.choice(self.sa_pairs)
+            s2,r = self.model[(s,a)]
+            self.q_update(s, a, r, s2)
+
+    def train_episode(self) -> Dict[str,float]:
         """
-        Effectue une étape de planification en utilisant le modèle.
+        Un épisode complet de Dyna-Q :
+        - interaction réelle
+        - Q-update et model-update
+        - phase de planning
         """
-        if not self.state_action_pairs:
-            return
-            
-        # Sélectionner aléatoirement une paire (état, action) déjà visitée
-        state, action = random.choice(self.state_action_pairs)
-        
-        # Récupérer la récompense et l'état suivant du modèle
-        reward, next_state = self.model[(state, action)]
-        
-        # Effectuer une mise à jour Q-learning simulée
-        target = reward + self.gamma * np.max(self.Q[next_state])
-        self.Q[state, action] += self.alpha * (target - self.Q[state, action])
-        
-    def train_step(self, state: int, action: int, reward: float, next_state: int):
-        """
-        Effectue une étape d'entraînement complète (apprentissage + planification).
-        
-        Args:
-            state: État actuel
-            action: Action prise
-            reward: Récompense reçue
-            next_state: État suivant
-        """
-        # Apprentissage direct : Q-learning sur l'expérience réelle
-        self.update_q_value(state, action, reward, next_state)
-        
-        # Mise à jour du modèle
-        self.update_model(state, action, next_state, reward)
-        
-        # Planification : n étapes de Q-learning simulé
-        for _ in range(self.n_planning):
-            self.planning_step()
-        
-    def train_episode(self) -> Dict[str, Any]:
-        """
-        Entraîne sur un épisode complet.
-        
-        Returns:
-            Statistiques de l'épisode
-        """
-        if hasattr(self.env, 'reset'):
-            # Environnement Gym
-            state = self.env.reset()
-            if isinstance(state, tuple):
-                state = state[0]  # Nouveau format gym
-        else:
-            # Environnement personnalisé
-            state = self.env.reset()
-            
+        s = self.env.reset()
         total_reward = 0.0
         steps = 0
-        
-        while True:
-            # Choisir une action selon epsilon-greedy
-            action = self.epsilon_greedy_policy(state)
-            
-            # Prendre l'action
-            if hasattr(self.env, 'step'):
-                result = self.env.step(action)
-                if len(result) == 4:
-                    next_state, reward, done, info = result
-                else:
-                    next_state, reward, done, info, _ = result
-            else:
-                next_state, reward, done = self.env.step(action)
-                
-            # Entraîner (apprentissage direct + planification)
-            self.train_step(state, action, reward, next_state)
-            
-            # Accumuler les statistiques
-            total_reward += reward
+        done = False
+
+        while not done and steps < 1000:
+            a = self.epsilon_greedy(s)
+            s2, r, done, _ = self.env.step(a)
+
+            # 1) apprentissage réel
+            self.q_update(s, a, r, s2)
+            # 2) mise à jour du modèle
+            self.update_model(s, a, r, s2)
+            # 3) planification
+            self.planning()
+
+            total_reward += r
+            s = s2
             steps += 1
-            
-            # Préparer pour l'itération suivante
-            state = next_state
-            
-            if done or steps >= 1000:  # Protection contre les boucles infinies
-                break
-        
-        return {
-            'episode_reward': total_reward,
-            'episode_steps': steps,
-            'epsilon': self.epsilon,
-            'model_size': len(self.model)
-        }
-        
-    def train(self, num_episodes: int = 1000) -> Dict[str, Any]:
+
+        return {'reward': total_reward, 'steps': steps}
+
+    def train(self, num_episodes: int = 1000) -> Dict[str,Any]:
         """
-        Entraîne l'algorithme Dyna-Q.
-        
-        Args:
-            num_episodes: Nombre d'épisodes d'entraînement
-            
-        Returns:
-            Dictionnaire contenant les résultats d'entraînement
+        Boucle d'entraînement complète :
+        - num_episodes épisodes Dyna-Q
+        - décroissance linéaire de ε vers 0.01
+        - extraction de la politique gloutonne finale
         """
-        self.history = []
-        
-        # Variables pour EMA (Exponential Moving Average)
-        ema_score = 0.0
-        ema_count = 0
-        
-        all_ema_scores = []
-        episode_rewards = []
-        
-        print(f"Démarrage de l'entraînement Dyna-Q pour {num_episodes} épisodes...")
-        
-        for episode in range(1, num_episodes + 1):
-            # Entraîner sur un épisode
-            episode_stats = self.train_episode()
-            
-            # Mettre à jour EMA
-            ema_score = 0.95 * ema_score + (1 - 0.95) * episode_stats['episode_reward']
-            ema_count += 1
-            
-            # Correction du biais EMA
-            corrected_ema_score = ema_score / (1 - 0.95 ** ema_count)
-            
-            # Enregistrer les statistiques
+        decay = (self.initial_epsilon - 0.01) / num_episodes
+        self.history.clear()
+
+        for ep in range(1, num_episodes+1):
+            stats = self.train_episode()
+            # decay ε
+            self.epsilon = max(0.01, self.epsilon - decay)
+
             self.history.append({
-                'episode': episode,
-                'episode_reward': episode_stats['episode_reward'],
-                'episode_steps': episode_stats['episode_steps'],
-                'ema_score': corrected_ema_score,
+                'episode': ep,
+                'reward':  stats['reward'],
+                'steps':   stats['steps'],
                 'epsilon': self.epsilon,
-                'model_size': episode_stats['model_size']
+                'model_size': len(self.model)
             })
-            
-            # Stocker pour les graphiques
-            all_ema_scores.append(corrected_ema_score)
-            episode_rewards.append(episode_stats['episode_reward'])
-            
-            # Affichage périodique
-            if episode % max(1, num_episodes // 10) == 0:
-                print(f"Épisode {episode}: EMA Score={corrected_ema_score:.4f}, "
-                      f"Modèle: {episode_stats['model_size']} paires état-action")
-        
-        # Extraire la politique finale
-        self.policy = self.extract_policy()
-        
-        print(f"Entraînement terminé après {num_episodes} épisodes")
-        print(f"Score EMA final: {corrected_ema_score:.4f}")
-        print(f"Taille du modèle final: {len(self.model)} paires état-action")
-        
-        return {
-            'all_ema_scores': all_ema_scores,
-            'episode_rewards': episode_rewards,
-            'final_policy': self.policy,
-            'final_q_values': self.Q.copy(),
-            'final_model': self.model.copy(),
-            'history': self.history
-        }
-    
-    def extract_policy(self) -> np.ndarray:
-        """
-        Extrait la politique greedy optimale à partir des valeurs Q.
-        
-        Returns:
-            Politique déterministe optimale
-        """
-        policy = np.zeros(self.nS, dtype=int)
+            if ep % max(1, num_episodes//10) == 0:
+                print(f"[Dyna-Q] Ep{ep}/{num_episodes}  R={stats['reward']:.2f}  ε={self.epsilon:.3f}  Model={(len(self.model))}")
+
+        # politique gloutonne finale
         for s in range(self.nS):
-            policy[s] = int(np.argmax(self.Q[s, :]))
-        return policy
-        
-    def save(self, filepath: str):
-        """Sauvegarde le modèle."""
-        model_data = {
-            'Q': self.Q.tolist(),
-            'model': {str(k): v for k, v in self.model.items()},
-            'policy': self.policy.tolist() if self.policy is not None else None,
-            'alpha': self.alpha,
-            'gamma': self.gamma,
-            'epsilon': self.epsilon,
-            'n_planning': self.n_planning,
-            'history': self.history
+            self.policy[s] = int(np.argmax(self.Q[s]))
+
+        return {
+            'Q':          self.Q,
+            'policy':     self.policy,
+            'history':    self.history,
+            'model':      self.model
         }
-        save_model(model_data, filepath)
-        
-    def load(self, filepath: str):
-        """Charge un modèle sauvegardé."""
-        model_data = load_model(filepath)
-        self.Q = np.array(model_data['Q'])
-        self.model = {eval(k): v for k, v in model_data['model'].items()}
-        self.policy = np.array(model_data['policy']) if model_data['policy'] else None
-        self.alpha = model_data['alpha']
-        self.gamma = model_data['gamma']
-        self.epsilon = model_data['epsilon']
-        self.n_planning = model_data['n_planning']
-        self.history = model_data['history']
+
+    def evaluate(self, num_episodes: int = 100) -> Dict[str,float]:
+        """Évalue la politique gloutonne sans exploration."""
+        old_eps = self.epsilon
+        self.epsilon = 0.0
+        rewards, lengths = [], []
+
+        for _ in range(num_episodes):
+            s = self.env.reset()
+            done, G, steps = False, 0.0, 0
+            while not done and steps < 1000:
+                a = self.policy[s]
+                s, r, done, _ = self.env.step(a)
+                G += r; steps += 1
+            rewards.append(G); lengths.append(steps)
+
+        self.epsilon = old_eps
+        return {
+            'avg_reward': np.mean(rewards),
+            'std_reward': np.std(rewards),
+            'avg_steps':  np.mean(lengths)
+        }
+
+    def save(self, path: str):
+        save_model({
+            'Q':            self.Q.tolist(),
+            'policy':       self.policy.tolist(),
+            'model':        {str(k): v for k,v in self.model.items()},
+            'alpha':        self.alpha,
+            'gamma':        self.gamma,
+            'epsilon':      self.epsilon,
+            'planning_steps': self.planning_steps,
+            'history':      self.history
+        }, path)
+
+    def load(self, path: str):
+        data = load_model(path)
+        self.Q             = np.array(data['Q'])
+        self.policy        = np.array(data['policy'])
+        self.model         = {eval(k): tuple(v) for k,v in data['model'].items()}
+        self.alpha         = data['alpha']
+        self.gamma         = data['gamma']
+        self.epsilon       = data['epsilon']
+        self.planning_steps = data['planning_steps']
+        self.history       = data['history']
 
 
 class DynaQPlus:
     """
-    Implémentation de l'algorithme Dyna-Q+.
-    
-    Dyna-Q+ étend Dyna-Q en ajoutant un bonus d'exploration pour
-    encourager l'exploration des états-actions qui n'ont pas été
-    visités récemment.
+    Dyna-Q+ (Sutton & Barto, Alg. 8.4).
+
+    Comme Dyna-Q, mais ajoute un bonus d'exploration κ·√τ pour chaque
+    paire (s,a) non visitée récemment, où τ est le temps écoulé.
     """
-    
-    def __init__(self, env: Any, alpha: float = 0.1, gamma: float = 0.95, 
-                 epsilon: float = 0.1, n_planning: int = 5, kappa: float = 0.001):
+
+    def __init__(
+        self,
+        env: Any,
+        alpha: float         = 0.1,
+        gamma: float         = 0.95,
+        epsilon: float       = 0.1,
+        planning_steps: int  = 5,
+        kappa: float         = 0.001
+    ):
         """
-        Initialise Dyna-Q+.
-        
         Args:
-            env: Environnement
-            alpha: Taux d'apprentissage
-            gamma: Facteur de discount
-            epsilon: Paramètre epsilon-greedy
-            n_planning: Nombre d'étapes de planification par mise à jour
-            kappa: Paramètre du bonus d'exploration
+            env           : Environnement Gym-like
+            alpha         : taux d'apprentissage α
+            gamma         : facteur d'actualisation γ
+            epsilon       : paramètre ε pour ε-greedy
+            planning_steps: nombre de pas de planification par interaction réelle
+            kappa         : coefficient du bonus d'exploration
         """
-        self.env = env
-        self.alpha = alpha
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.n_planning = n_planning
-        self.kappa = kappa  # Coefficient du bonus de découverte
-        
-        # Détection du type d'environnement
-        if hasattr(env, 'observation_space') and hasattr(env, 'action_space'):
-            # Environnement Gym
+        self.env            = env
+        self.alpha          = alpha
+        self.gamma          = gamma
+        self.epsilon        = epsilon
+        self.initial_epsilon = epsilon
+        self.planning_steps = planning_steps
+        self.kappa          = kappa
+
+        # Détection de nS et nA
+        if hasattr(env, 'nS') and hasattr(env, 'nA'):
+            self.nS, self.nA = env.nS, env.nA
+        else:
             self.nS = env.observation_space.n
             self.nA = env.action_space.n
-        else:
-            # Environnement personnalisé
-            self.nS = getattr(env, 'nS', getattr(env, 'length', 100))
-            self.nA = getattr(env, 'nA', 2)
-        
-        # Table Q et modèle de l'environnement
-        self.Q = np.zeros((self.nS, self.nA))
-        self.model = {}  # model[(state, action)] = (next_state, reward)
-        self.last_visit = {}  # last_visit[(state, action)] = dernier pas de vraie expérience
-        self.current_time = 0  # Compteur de pas globaux
-        
-        self.visited_states = set()
-        self.state_action_pairs = []
-        
-        self.policy = None
-        self.history = []
-        
-    def epsilon_greedy_policy(self, state: int) -> int:
-        """
-        Politique epsilon-greedy.
-        
-        Args:
-            state: État actuel
-            
-        Returns:
-            Action sélectionnée
-        """
+
+        # Table Q et modèle one-step
+        self.Q              = np.zeros((self.nS, self.nA), dtype=float)
+        self.model: Dict[Tuple[int,int], Tuple[int,float]] = {}
+        self.sa_pairs: List[Tuple[int,int]]             = []
+        self.last_visit: Dict[Tuple[int,int], int]      = {}
+        self.time                                         = 0
+
+        # Pour le suivi
+        self.policy = np.zeros(self.nS, dtype=int)
+        self.history: List[Dict[str, float]] = []
+
+    def epsilon_greedy(self, s: int) -> int:
+        """ε-greedy avec tie-breaking aléatoire."""
         if random.random() < self.epsilon:
-            return random.randint(0, self.nA - 1)
-        else:
-            return int(np.argmax(self.Q[state]))
-        
-    def update_model(self, state: int, action: int, next_state: int, reward: float):
+            return random.randrange(self.nA)
+        q_s = self.Q[s]
+        best = np.flatnonzero(q_s == q_s.max())
+        return int(random.choice(best))
+
+    def _update_q(self, s: int, a: int, r: float, s2: int, bonus: float = 0.0):
         """
-        Met à jour le modèle de l'environnement et les temps de visite.
-        
-        Args:
-            state: État actuel
-            action: Action prise
-            next_state: État suivant observé
-            reward: Récompense observée
+        Q-learning update (réel ou simulé) avec eventuel bonus :
+          Q(s,a) ← Q(s,a) + α [ r + bonus + γ max_a' Q(s2,a') − Q(s,a) ]
         """
-        # Incrémenter le temps et enregistrer la vraie expérience
-        self.current_time += 1
-        self.last_visit[(state, action)] = self.current_time
-        
-        # Mise à jour du modèle
-        self.model[(state, action)] = (reward, next_state)
-        self.visited_states.add(state)
-        
-        # Maintenir la liste des paires état-action pour la planification
-        if (state, action) not in self.state_action_pairs:
-            self.state_action_pairs.append((state, action))
-        
-    def exploration_bonus(self, state: int, action: int) -> float:
+        target = r + bonus + self.gamma * np.max(self.Q[s2])
+        self.Q[s,a] += self.alpha * (target - self.Q[s,a])
+
+    def _update_model(self, s: int, a: int, r: float, s2: int):
         """
-        Calcule le bonus d'exploration pour un couple état-action.
-        
-        Args:
-            state: État
-            action: Action
-            
-        Returns:
-            Bonus d'exploration
+        Stocke la transition observée et date de visite.
         """
-        # Calcul du bonus : racine du temps écoulé depuis dernière vraie visite
-        tau = self.current_time - self.last_visit.get((state, action), 0)
-        return self.kappa * math.sqrt(tau)
-        
-    def update_q_value(self, state: int, action: int, reward: float, next_state: int):
+        self.time += 1
+        self.model[(s,a)]     = (s2, r)
+        self.last_visit[(s,a)] = self.time
+        if (s,a) not in self.sa_pairs:
+            self.sa_pairs.append((s,a))
+
+    def _planning(self):
+        """Effectue des Q‐updates simulés via le modèle avec bonus."""
+        for _ in range(self.planning_steps):
+            s,a = random.choice(self.sa_pairs)
+            s2,r = self.model[(s,a)]
+            tau   = self.time - self.last_visit.get((s,a), 0)
+            bonus = self.kappa * math.sqrt(tau)
+            self._update_q(s, a, r, s2, bonus)
+
+    def train_episode(self) -> Dict[str, float]:
         """
-        Met à jour la valeur Q selon l'équation Q-Learning.
-        
-        Args:
-            state: État actuel
-            action: Action prise
-            reward: Récompense reçue
-            next_state: État suivant
+        Un épisode Dyna-Q+ :
+        1) interaction réelle: Q-update + model-update
+        2) planification
         """
-        # Q-learning update (sans bonus pour l'expérience réelle)
-        target = reward + self.gamma * np.max(self.Q[next_state])
-        self.Q[state, action] += self.alpha * (target - self.Q[state, action])
-        
-    def planning_step(self):
-        """
-        Effectue une étape de planification avec bonus d'exploration.
-        """
-        if not self.state_action_pairs:
-            return
-            
-        # Sélectionner aléatoirement une paire (état, action) déjà visitée
-        state, action = random.choice(self.state_action_pairs)
-        
-        # Récupérer la récompense et l'état suivant du modèle
-        reward, next_state = self.model[(state, action)]
-        
-        # Calculer le bonus d'exploration
-        bonus = self.exploration_bonus(state, action)
-        
-        # Effectuer une mise à jour Q-learning simulée avec bonus
-        target = reward + bonus + self.gamma * np.max(self.Q[next_state])
-        self.Q[state, action] += self.alpha * (target - self.Q[state, action])
-        
-    def train_step(self, state: int, action: int, reward: float, next_state: int):
-        """
-        Effectue une étape d'entraînement complète (apprentissage + planification).
-        
-        Args:
-            state: État actuel
-            action: Action prise
-            reward: Récompense reçue
-            next_state: État suivant
-        """
-        # Mise à jour du modèle et des temps de visite
-        self.update_model(state, action, next_state, reward)
-        
-        # Apprentissage direct : Q-learning sur l'expérience réelle
-        self.update_q_value(state, action, reward, next_state)
-        
-        # Planification : n étapes de Q-learning simulé avec bonus
-        for _ in range(self.n_planning):
-            self.planning_step()
-        
-    def train_episode(self) -> Dict[str, Any]:
-        """
-        Entraîne sur un épisode complet.
-        
-        Returns:
-            Statistiques de l'épisode
-        """
-        if hasattr(self.env, 'reset'):
-            # Environnement Gym
-            state = self.env.reset()
-            if isinstance(state, tuple):
-                state = state[0]  # Nouveau format gym
-        else:
-            # Environnement personnalisé
-            state = self.env.reset()
-            
+        s = self.env.reset()
         total_reward = 0.0
         steps = 0
-        
-        while True:
-            # Choisir une action selon epsilon-greedy
-            action = self.epsilon_greedy_policy(state)
-            
-            # Prendre l'action
-            if hasattr(self.env, 'step'):
-                result = self.env.step(action)
-                if len(result) == 4:
-                    next_state, reward, done, info = result
-                else:
-                    next_state, reward, done, info, _ = result
-            else:
-                next_state, reward, done = self.env.step(action)
-                
-            # Entraîner (apprentissage direct + planification)
-            self.train_step(state, action, reward, next_state)
-            
-            # Accumuler les statistiques
-            total_reward += reward
+        done = False
+
+        while not done and steps < 1000:
+            a = self.epsilon_greedy(s)
+            s2, r, done, _ = self.env.step(a)
+
+            # 1) apprentissage réel
+            self._update_q(s, a, r, s2)
+            self._update_model(s, a, r, s2)
+            # 2) planification
+            self._planning()
+
+            total_reward += r
+            s = s2
             steps += 1
-            
-            # Préparer pour l'itération suivante
-            state = next_state
-            
-            if done or steps >= 1000:  # Protection contre les boucles infinies
-                break
-        
-        return {
-            'episode_reward': total_reward,
-            'episode_steps': steps,
-            'epsilon': self.epsilon,
-            'model_size': len(self.model),
-            'current_time': self.current_time
-        }
-        
+
+        return {'reward': total_reward, 'steps': steps, 'time': self.time}
+
     def train(self, num_episodes: int = 1000) -> Dict[str, Any]:
         """
-        Entraîne l'algorithme Dyna-Q+.
-        
-        Args:
-            num_episodes: Nombre d'épisodes d'entraînement
-            
-        Returns:
-            Dictionnaire contenant les résultats d'entraînement
+        Boucle d'entraînement Dyna-Q+ :
+        - num_episodes épisodes
+        - décroissance linéaire de ε vers 0.01
+        - extraction de la politique gloutonne finale
         """
-        self.history = []
-        
-        # Variables pour EMA (Exponential Moving Average)
-        ema_score = 0.0
-        ema_count = 0
-        
-        all_ema_scores = []
-        episode_rewards = []
-        
-        print(f"Démarrage de l'entraînement Dyna-Q+ pour {num_episodes} épisodes...")
-        
-        for episode in range(1, num_episodes + 1):
-            # Entraîner sur un épisode
-            episode_stats = self.train_episode()
-            
-            # Mettre à jour EMA
-            ema_score = 0.95 * ema_score + (1 - 0.95) * episode_stats['episode_reward']
-            ema_count += 1
-            
-            # Correction du biais EMA
-            corrected_ema_score = ema_score / (1 - 0.95 ** ema_count)
-            
-            # Enregistrer les statistiques
+        decay = (self.initial_epsilon - 0.01) / num_episodes
+        self.history.clear()
+
+        for ep in range(1, num_episodes+1):
+            stats = self.train_episode()
+            self.epsilon = max(0.01, self.epsilon - decay)
+
             self.history.append({
-                'episode': episode,
-                'episode_reward': episode_stats['episode_reward'],
-                'episode_steps': episode_stats['episode_steps'],
-                'ema_score': corrected_ema_score,
+                'episode': ep,
+                'reward':  stats['reward'],
+                'steps':   stats['steps'],
+                'time':    stats['time'],
                 'epsilon': self.epsilon,
-                'model_size': episode_stats['model_size'],
-                'current_time': episode_stats['current_time']
+                'model_size': len(self.model)
             })
-            
-            # Stocker pour les graphiques
-            all_ema_scores.append(corrected_ema_score)
-            episode_rewards.append(episode_stats['episode_reward'])
-            
-            # Affichage périodique
-            if episode % max(1, num_episodes // 10) == 0:
-                print(f"Épisode {episode}: EMA Score={corrected_ema_score:.4f}, "
-                      f"Modèle: {episode_stats['model_size']} paires état-action, "
-                      f"Temps: {episode_stats['current_time']}")
-        
-        # Extraire la politique finale
-        self.policy = self.extract_policy()
-        
-        print(f"Entraînement terminé après {num_episodes} épisodes")
-        print(f"Score EMA final: {corrected_ema_score:.4f}")
-        print(f"Taille du modèle final: {len(self.model)} paires état-action")
-        print(f"Temps total: {self.current_time} pas")
-        
-        return {
-            'all_ema_scores': all_ema_scores,
-            'episode_rewards': episode_rewards,
-            'final_policy': self.policy,
-            'final_q_values': self.Q.copy(),
-            'final_model': self.model.copy(),
-            'history': self.history
-        }
-    
-    def extract_policy(self) -> np.ndarray:
-        """
-        Extrait la politique greedy optimale à partir des valeurs Q.
-        
-        Returns:
-            Politique déterministe optimale
-        """
-        policy = np.zeros(self.nS, dtype=int)
+            if ep % max(1, num_episodes//10) == 0:
+                print(f"[Dyna-Q+] Ep{ep}/{num_episodes}  R={stats['reward']:.2f}  ε={self.epsilon:.3f}  τ={stats['time']}  |model|={len(self.model)}")
+
+        # Politique finale gloutonne
         for s in range(self.nS):
-            policy[s] = int(np.argmax(self.Q[s, :]))
-        return policy
-        
-    def save(self, filepath: str):
-        """Sauvegarde le modèle."""
-        model_data = {
-            'Q': self.Q.tolist(),
-            'model': {str(k): v for k, v in self.model.items()},
-            'last_visit': {str(k): v for k, v in self.last_visit.items()},
-            'current_time': self.current_time,
-            'policy': self.policy.tolist() if self.policy is not None else None,
-            'alpha': self.alpha,
-            'gamma': self.gamma,
-            'epsilon': self.epsilon,
-            'n_planning': self.n_planning,
-            'kappa': self.kappa,
-            'history': self.history
+            self.policy[s] = int(np.argmax(self.Q[s]))
+
+        return {
+            'Q':       self.Q,
+            'policy':  self.policy,
+            'history': self.history,
+            'model':   self.model
         }
-        save_model(model_data, filepath)
-        
-    def load(self, filepath: str):
-        """Charge un modèle sauvegardé."""
-        model_data = load_model(filepath)
-        self.Q = np.array(model_data['Q'])
-        self.model = {eval(k): v for k, v in model_data['model'].items()}
-        self.last_visit = {eval(k): v for k, v in model_data['last_visit'].items()}
-        self.current_time = model_data['current_time']
-        self.policy = np.array(model_data['policy']) if model_data['policy'] else None
-        self.alpha = model_data['alpha']
-        self.gamma = model_data['gamma']
-        self.epsilon = model_data['epsilon']
-        self.n_planning = model_data['n_planning']
-        self.kappa = model_data['kappa']
-        self.history = model_data['history'] 
+
+    def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
+        """Évalue la politique gloutonne (ε=0)."""
+        old_eps = self.epsilon
+        self.epsilon = 0.0
+        rewards, lengths = [], []
+
+        for _ in range(num_episodes):
+            s = self.env.reset()
+            done, G, steps = False, 0.0, 0
+            while not done and steps < 1000:
+                a = self.policy[s]
+                s, r, done, _ = self.env.step(a)
+                G += r; steps += 1
+            rewards.append(G); lengths.append(steps)
+
+        self.epsilon = old_eps
+        return {
+            'avg_reward': np.mean(rewards),
+            'std_reward': np.std(rewards),
+            'avg_steps':  np.mean(lengths)
+        }
+
+    def save(self, path: str):
+        save_model({
+            'Q':         self.Q.tolist(),
+            'policy':    self.policy.tolist(),
+            'model':     {str(k): v for k,v in self.model.items()},
+            'last_visit':{str(k): v for k,v in self.last_visit.items()},
+            'time':      self.time,
+            'alpha':     self.alpha,
+            'gamma':     self.gamma,
+            'epsilon':   self.epsilon,
+            'planning_steps': self.planning_steps,
+            'kappa':     self.kappa,
+            'history':   self.history
+        }, path)
+
+    def load(self, path: str):
+        data = load_model(path)
+        self.Q             = np.array(data['Q'])
+        self.policy        = np.array(data['policy'])
+        self.model         = {eval(k): tuple(v) for k,v in data['model'].items()}
+        self.last_visit    = {eval(k): v     for k,v in data['last_visit'].items()}
+        self.time          = data['time']
+        self.alpha         = data['alpha']
+        self.gamma         = data['gamma']
+        self.epsilon       = data['epsilon']
+        self.planning_steps= data['planning_steps']
+        self.kappa         = data['kappa']
+        self.history       = data['history']
