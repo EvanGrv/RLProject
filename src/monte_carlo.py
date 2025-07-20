@@ -17,178 +17,314 @@ from collections import defaultdict
 from src.utils_io import save_model, load_model
 
 
-
 class MonteCarloES:
     """
-    Monte Carlo Control with Exploring Starts (MC-ES).
-
-    Garantit que chaque couple (état, action) a une probabilité non nulle d'être
-    utilisé comme point de départ d'épisode.
+    Implémentation de Monte Carlo Exploring Starts.
+    
+    MC-ES assure que tous les couples état-action ont une probabilité
+    non nulle d'être sélectionnés comme point de départ.
     """
-
+    
     def __init__(self, env: Any, gamma: float = 1.0):
         """
+        Initialise Monte Carlo ES.
+        
         Args:
-            env: Environnement conforme à l'API OpenAI Gym
-            gamma: facteur d'actualisation
+            env: Environnement
+            gamma: Facteur de discount
         """
         self.env = env
         self.gamma = gamma
-
-        # Structures MDP
-        self._initialize_mdp_structures()
-
-        # Historique d'entraînement
-        self.history: List[Dict[str, float]] = []
-
-    def _initialize_mdp_structures(self):
-        # Nombre d'états et d'actions
-        if hasattr(self.env, 'nS') and hasattr(self.env, 'nA'):
-            self.nS, self.nA = self.env.nS, self.env.nA
-        else:
-            # Fallback pour Gym classique
-            self.nS = getattr(self.env.observation_space, 'n', None)
-            self.nA = getattr(self.env.action_space, 'n', None)
-            if self.nS is None or self.nA is None:
-                raise ValueError("Impossible de déterminer nS ou nA à partir de l'env.")
+        self.Q = None
+        self.policy = None
+        self.returns_sum = {}
+        self.returns_count = {}
+        self.history = []
         
-        # Initialisation de Q et de la politique
+        # Initialiser les structures MDP
+        self._initialize_mdp_structures()
+        
+    def _initialize_mdp_structures(self):
+        """Initialise les structures MDP nécessaires."""
+        # Priorité 1: Environnements avec get_mdp_info (nos environnements personnalisés)
+        if hasattr(self.env, 'get_mdp_info'):
+            mdp_info = self.env.get_mdp_info()
+            self.nS = len(mdp_info['states'])
+            self.nA = len(mdp_info['actions'])
+            self.transition_probs = mdp_info['transition_matrix']
+            self.rewards = mdp_info['reward_matrix']
+            self.terminal_states = mdp_info.get('terminals', [])
+            
+        # Priorité 2: Environnements Gym avec attribut P
+        elif hasattr(self.env, 'P'):
+            # Déterminer le nombre d'états et d'actions
+            if hasattr(self.env, 'nS') and hasattr(self.env, 'nA'):
+                self.nS = self.env.nS
+                self.nA = self.env.nA
+            else:
+                # Environnement générique
+                self.nS = getattr(self.env, 'observation_space', type('obj', (object,), {'n': 16})).n
+                self.nA = getattr(self.env, 'action_space', type('obj', (object,), {'n': 4})).n
+            
+            # Extraire les probabilités de transition
+            self.transition_probs = self._extract_transition_probabilities()
+            self.rewards = self._extract_rewards()
+            
+            # Identifier les états terminaux
+            self.terminal_states = []
+            if hasattr(self.env, 'desc'):
+                # Pour FrozenLake par exemple
+                desc = self.env.desc
+                for i in range(desc.shape[0]):
+                    for j in range(desc.shape[1]):
+                        if desc[i, j] in [b'H', b'G']:  # Hole ou Goal
+                            self.terminal_states.append(i * desc.shape[1] + j)
+        
+        # Priorité 3: Environnements sans MDP explicite
+        else:
+            # Déterminer le nombre d'états et d'actions
+            if hasattr(self.env, 'nS') and hasattr(self.env, 'nA'):
+                self.nS = self.env.nS
+                self.nA = self.env.nA
+            else:
+                # Environnement générique
+                self.nS = getattr(self.env, 'observation_space', type('obj', (object,), {'n': 16})).n
+                self.nA = getattr(self.env, 'action_space', type('obj', (object,), {'n': 4})).n
+            
+            self.transition_probs = None
+            self.rewards = [0.0, 1.0]  # Récompenses par défaut
+            self.terminal_states = []
+        
+        # Initialiser Q et politique
         self.Q = np.zeros((self.nS, self.nA), dtype=float)
         self.policy = np.zeros(self.nS, dtype=int)
-
-        # Sommes et comptes des retours
-        self.returns_sum = defaultdict(float)   # clé = (s,a)
-        self.returns_count = defaultdict(int)
-
-    def generate_episode(self, start_state: int, start_action: int) -> List[Tuple[int,int,float]]:
-        """Génère un épisode en forçant (s₀, a₀) = (start_state, start_action)."""
+        
+    def _extract_transition_probabilities(self):
+        """Extrait les probabilités de transition de l'environnement."""
+        rewards = set()
+        for s in range(self.nS):
+            for a in range(self.nA):
+                if s in self.env.P and a in self.env.P[s]:
+                    for prob, next_state, reward, done in self.env.P[s][a]:
+                        rewards.add(reward)
+        
+        self.rewards = sorted(list(rewards))
+        p = np.zeros((self.nS, self.nA, self.nS, len(self.rewards)))
+        
+        for s in range(self.nS):
+            for a in range(self.nA):
+                if s in self.env.P and a in self.env.P[s]:
+                    for prob, next_state, reward, done in self.env.P[s][a]:
+                        r_idx = self.rewards.index(reward)
+                        p[s, a, next_state, r_idx] = prob
+        
+        return p
+        
+    def _extract_rewards(self):
+        """Extrait la liste des récompenses possibles."""
+        rewards = set()
+        for s in range(self.nS):
+            for a in range(self.nA):
+                if s in self.env.P and a in self.env.P[s]:
+                    for prob, next_state, reward, done in self.env.P[s][a]:
+                        rewards.add(reward)
+        return sorted(list(rewards))
+    
+    def sample_next_state_reward(self, s: int, a: int) -> Tuple[int, float]:
+        """
+        Échantillonne l'état suivant s' et la récompense r à partir des probabilités de transition.
+        
+        Args:
+            s: État actuel
+            a: Action
+            
+        Returns:
+            Tuple (next_state, reward)
+        """
+        if self.transition_probs is None:
+            # Fallback pour environnements sans probabilités explicites
+            state = self.env.reset()
+            next_state, reward, done, _ = self.env.step(a)
+            return next_state, reward
+        
+        # Utiliser les probabilités de transition
+        num_states = self.transition_probs.shape[2]
+        
+        # Construire une liste de (s', reward) avec prob > 0
+        candidates = []
+        probs = []
+        
+        for s_p in range(num_states):
+            prob = self.transition_probs[s, a, s_p]
+            if prob > 0:
+                # Pour les environnements avec get_mdp_info, la récompense est dans reward_matrix
+                if hasattr(self.env, 'get_mdp_info'):
+                    reward = self.rewards[s, a]  # reward_matrix[s, a]
+                else:
+                    # Pour les environnements Gym, utiliser la récompense associée à la transition
+                    reward = self.rewards[0]  # Fallback
+                
+                candidates.append((s_p, reward))
+                probs.append(prob)
+        
+        # Normaliser (au cas où)
+        probs = np.array(probs, dtype=np.float64)
+        if probs.sum() > 0:
+            probs /= probs.sum()
+        else:
+            # Cas d'erreur, distribution uniforme
+            probs = np.ones(len(candidates)) / len(candidates) if candidates else np.array([1.0])
+            
+        # Tirage
+        if candidates:
+            idx = np.random.choice(len(candidates), p=probs)
+            s_p, reward = candidates[idx]
+            return s_p, reward
+        else:
+            return s, 0.0
+        
+    def generate_episode(self, exploring_starts: bool = True) -> List[Tuple[int, int, float]]:
+        """
+        Génère un épisode complet avec Exploring Starts.
+        
+        Args:
+            exploring_starts: Si True, utilise exploring starts
+            
+        Returns:
+            Liste des transitions (état, action, reward)
+        """
         episode = []
-        # Réinitialisation: récupérer l'état initial
-        obs = self.env.reset()
-        # Forcer l’état si possible (Gym supporte env.unwrapped.s = ...)
-        try:
-            self.env.unwrapped.state = start_state
-            state = start_state
-        except:
-            state = obs  # on suppose alors que reset() renvoie directement l'état
-
-        action = start_action
-        done = False
-        while not done:
-            next_obs, reward, done, _ = self.env.step(action)
-            episode.append((state, action, reward))
-            if done:
+        
+        if exploring_starts:
+            # Exploring Start: état et action initiaux aléatoires
+            start_state = random.choice(list(range(self.nS)))
+            start_action = random.choice(list(range(self.nA)))
+            
+            # Appliquer la transition (s,a) fixée par ES
+            s_next, r = self.sample_next_state_reward(start_state, start_action)
+            episode.append((start_state, start_action, r))
+            s = s_next
+        else:
+            # Démarrage normal
+            s = random.choice(list(range(self.nS)))
+        
+        # Continuer selon la politique jusqu'à l'état terminal
+        max_steps = 1000  # Protection contre les boucles infinies
+        steps = 0
+        
+        while s not in self.terminal_states and steps < max_steps:
+            a = self.policy[s]
+            s_next, r = self.sample_next_state_reward(s, a)
+            episode.append((s, a, r))
+            s = s_next
+            steps += 1
+            
+            if s in self.terminal_states:
                 break
-            state = next_obs
-            action = self.policy[state]
+        
         return episode
-
-    def update_q_function(self, episode: List[Tuple[int,int,float]]):
-        """First-visit MC: met à jour Q et les compteurs de retours."""
+        
+    def update_q_values(self, episode: List[Tuple[int, int, float]]):
+        """
+        Met à jour les valeurs Q à partir d'un épisode (First-Visit).
+        
+        Args:
+            episode: Liste des transitions (état, action, reward)
+        """
+        # Calculer les returns
         G = 0.0
-        visited = set()
-        # On parcourt l’épisode à l’envers
-        for (s, a, r) in reversed(episode):
-            G = self.gamma * G + r
-            if (s, a) not in visited:
-                visited.add((s, a))
-                self.returns_count[(s,a)] += 1
-                self.returns_sum[(s,a)] += G
-                self.Q[s,a] = self.returns_sum[(s,a)] / self.returns_count[(s,a)]
-
+        for t in range(len(episode) - 1, -1, -1):
+            s_t, a_t, r_tp1 = episode[t]
+            G = self.gamma * G + r_tp1
+            
+            # Vérifier si c'est la première visite de (s_t, a_t)
+            first_visit = True
+            for j in range(t):
+                if episode[j][0] == s_t and episode[j][1] == a_t:
+                    first_visit = False
+                    break
+            
+            if first_visit:
+                # Mettre à jour Q(s,a) avec la moyenne des returns
+                key = (s_t, a_t)
+                self.returns_sum[key] = self.returns_sum.get(key, 0.0) + G
+                self.returns_count[key] = self.returns_count.get(key, 0) + 1
+                self.Q[s_t, a_t] = self.returns_sum[key] / self.returns_count[key]
+        
     def improve_policy(self):
-        """Politique gloutonne basée sur Q avec tie-breaking aléatoire."""
+        """Met à jour la politique basée sur les valeurs Q (greedy)."""
         for s in range(self.nS):
-            q_s = self.Q[s]
-            # argmax avec random tie-break
-            max_val = np.max(q_s)
-            candidates = np.flatnonzero(q_s == max_val)
-            self.policy[s] = random.choice(candidates)
-
+            if s not in self.terminal_states:
+                self.policy[s] = int(np.argmax(self.Q[s, :]))
+        
     def train(self, num_episodes: int = 1000) -> Dict[str, Any]:
-        """Boucle principale d'entraînement MC-ES."""
-        # Politique initiale aléatoire
-        for s in range(self.nS):
-            self.policy[s] = random.randrange(self.nA)
-
-        self.history.clear()
+        """
+        Entraîne l'algorithme MC-ES.
+        
+        Args:
+            num_episodes: Nombre d'épisodes d'entraînement
+            
+        Returns:
+            Dictionnaire contenant les résultats d'entraînement
+        """
+        self.history = []
+        
         for ep in range(1, num_episodes + 1):
-            # Exploring starts
-            s0 = random.randrange(self.nS)
-            a0 = random.randrange(self.nA)
-
-            episode = self.generate_episode(s0, a0)
-            if not episode:
-                continue
-
-            self.update_q_function(episode)
+            # Générer un épisode
+            episode = self.generate_episode(exploring_starts=True)
+            
+            # Mettre à jour les valeurs Q
+            self.update_q_values(episode)
+            
+            # Améliorer la politique
             self.improve_policy()
-
-            # Stats
-            total_r = sum(r for _,_,r in episode)
-            avg_q = np.mean(self.Q)
-            self.history.append({
-                'episode': ep,
-                'reward': total_r,
-                'avg_q': avg_q,
-                'length': len(episode)
-            })
-            if ep % 100 == 0:
-                print(f"[MC-ES] Épisode {ep}: Récompense={total_r:.2f}, Q_moy={avg_q:.4f}")
-
+            
+            # Enregistrer les statistiques
+            if ep % max(1, num_episodes // 20) == 0 or ep == 1:
+                avg_q = np.mean(self.Q)
+                max_q = np.max(self.Q)
+                episode_length = len(episode)
+                
+                self.history.append({
+                    'episode': ep,
+                    'avg_q_value': avg_q,
+                    'max_q_value': max_q,
+                    'episode_length': episode_length,
+                    'num_state_actions_visited': len(self.returns_count)
+                })
+                
+                print(f"Épisode {ep}/{num_episodes} - Q moyen: {avg_q:.4f}, Longueur: {episode_length}")
+        
         return {
             'Q': self.Q,
             'policy': self.policy,
-            'history': self.history
+            'history': self.history,
+            'episodes': num_episodes,
+            'returns_sum': self.returns_sum,
+            'returns_count': self.returns_count
         }
-
-    def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
-        """Évalue la politique apprise sur plusieurs épisodes."""
-        if self.policy is None:
-            raise RuntimeError("Politique non initialisée.")
-        rewards, lengths = [], []
-        succ = 0
-        for _ in range(num_episodes):
-            obs = self.env.reset()
-            state = obs if not hasattr(self.env, 'state') else self.env.state
-            done, G = False, 0.0
-            steps = 0
-            while not done:
-                a = self.policy[state]
-                state, r, done, _ = self.env.step(a)
-                G += r; steps += 1
-            rewards.append(G); lengths.append(steps)
-            if G > 0: succ += 1
-
-        return {
-            'avg_reward': np.mean(rewards),
-            'std_reward': np.std(rewards),
-            'success_rate': succ / num_episodes,
-            'avg_length': np.mean(lengths)
-        }
-
-    def get_action(self, state: int) -> int:
-        """Pour déploiement pas-à-pas."""
-        return int(self.policy[state])
-
+        
     def save(self, filepath: str):
-        save_model({
+        """Sauvegarde le modèle."""
+        model_data = {
             'Q': self.Q,
             'policy': self.policy,
-            'returns_sum': dict(self.returns_sum),
-            'returns_count': dict(self.returns_count),
             'gamma': self.gamma,
-            'history': self.history
-        }, filepath)
-
+            'history': self.history,
+            'returns_sum': self.returns_sum,
+            'returns_count': self.returns_count
+        }
+        save_model(model_data, filepath)
+        
     def load(self, filepath: str):
-        data = load_model(filepath)
-        self.Q = data['Q']
-        self.policy = data['policy']
-        self.returns_sum = defaultdict(float, data['returns_sum'])
-        self.returns_count = defaultdict(int, data['returns_count'])
-        self.gamma = data['gamma']
-        self.history = data['history']
+        """Charge un modèle sauvegardé."""
+        model_data = load_model(filepath)
+        self.Q = model_data['Q']
+        self.policy = model_data['policy']
+        self.gamma = model_data['gamma']
+        self.history = model_data['history']
+        self.returns_sum = model_data['returns_sum']
+        self.returns_count = model_data['returns_count']
 
 
 class OnPolicyMC:
