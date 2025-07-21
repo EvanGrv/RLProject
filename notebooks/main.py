@@ -7,6 +7,9 @@ import json
 from datetime import datetime
 import numpy as np
 
+# Lancer avec l'instructrion
+# python -m streamlit run notebooks/main.py
+
 # Ajout des chemins pour l'import dynamique des modules src et game
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../game')))
@@ -68,32 +71,45 @@ def to_serializable(obj):
     else:
         return obj
 
-# Fichier où l'historique des tests est sauvegardé
-HISTO_FILE = os.path.join(os.path.dirname(__file__), 'test_history.json')
+# Dossier où chaque expérimentation est sauvegardée dans un fichier séparé
+EXPERIMENTS_DIR = os.path.join(os.path.dirname(__file__), 'experiments_history')
+os.makedirs(EXPERIMENTS_DIR, exist_ok=True)
 
-# Fonction pour sauvegarder un résultat de test dans l'historique
+# Fonction pour sauvegarder un résultat de test dans un fichier séparé
+# Le nom du fichier est basé sur la date, l'environnement et le modèle
+import re
+def slugify(value):
+    value = str(value)
+    value = re.sub(r'[^\w\-]+', '_', value)
+    return value
+
 def save_test_result(result: dict):
-    try:
-        if os.path.exists(HISTO_FILE):
-            with open(HISTO_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        else:
-            data = []
-    except Exception:
-        data = []
-    data.append(result)
-    with open(HISTO_FILE, 'w', encoding='utf-8') as f:
-        json.dump(to_serializable(data), f, indent=2, ensure_ascii=False)
+    dt = result.get('datetime') or datetime.now().isoformat()
+    env = slugify(result.get('environnement', 'env'))
+    model = slugify(result.get('modele', 'model'))
+    filename = f"{dt.replace(':', '-').replace('.', '-')}_{env}_{model}.json"
+    filepath = os.path.join(EXPERIMENTS_DIR, filename)
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(to_serializable(result), f, indent=2, ensure_ascii=False)
 
-# Fonction pour charger l'historique des tests
+# Fonction pour charger l'historique des tests depuis tous les fichiers du dossier
 def load_test_history():
-    try:
-        if os.path.exists(HISTO_FILE):
-            with open(HISTO_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return []
+    history = []
+    if os.path.exists(EXPERIMENTS_DIR):
+        for fname in os.listdir(EXPERIMENTS_DIR):
+            if fname.endswith('.json'):
+                fpath = os.path.join(EXPERIMENTS_DIR, fname)
+                try:
+                    with open(fpath, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        history.append(data)
+                except Exception:
+                    pass
+    # Tri par date décroissante si possible
+    def get_dt(x):
+        return x.get('datetime', '')
+    history.sort(key=get_dt, reverse=True)
+    return history
 
 # Configuration de la page Streamlit (titre, layout)
 st.set_page_config(page_title="RLProject", layout="wide")
