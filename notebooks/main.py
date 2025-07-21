@@ -6,6 +6,9 @@ from typing import Any, Dict
 import json
 from datetime import datetime
 import numpy as np
+import pickle
+import glob
+import time
 
 # Ajout des chemins pour l'import dynamique des modules src et game
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
@@ -94,6 +97,39 @@ def load_test_history():
     except Exception:
         pass
     return []
+
+def save_trained_model(model, env_name, model_name, hyperparams):
+    """Sauvegarde le modèle entraîné au format pickle dans le dossier models/ avec un nom explicite, en excluant les objets non picklables."""
+    from datetime import datetime
+    import hashlib
+    # Générer un hash court des hyperparamètres pour unicité
+    hp_str = str(sorted(hyperparams.items()))
+    hp_hash = hashlib.md5(hp_str.encode()).hexdigest()[:8]
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"{model_name}_{env_name}_{timestamp}_{hp_hash}.pkl"
+    path = os.path.join(os.path.dirname(__file__), '../models', filename)
+    # Patch : suppression temporaire des attributs non picklables
+    env = getattr(model, 'env', None)
+    obs_space = None
+    act_space = None
+    if env is not None:
+        if hasattr(env, 'observation_space'):
+            obs_space = env.observation_space
+            del env.observation_space
+        if hasattr(env, 'action_space'):
+            act_space = env.action_space
+            del env.action_space
+    try:
+        with open(path, 'wb') as f:
+            pickle.dump(model, f)
+    finally:
+        # On restaure les attributs pour ne pas casser l'environnement en mémoire
+        if env is not None:
+            if obs_space is not None:
+                env.observation_space = obs_space
+            if act_space is not None:
+                env.action_space = act_space
+    return path
 
 # Configuration de la page Streamlit (titre, layout)
 st.set_page_config(page_title="RLProject", layout="wide")
@@ -258,6 +294,9 @@ with tabs[0]:
                 st.metric('Victoires', getattr(model, 'wins'))
             if hasattr(model, 'total_games'):
                 st.metric('Nombre de parties', getattr(model, 'total_games'))
+            # Sauvegarde du modèle entraîné au format pkl
+            model_path = save_trained_model(model, env_name, model_name, hyperparams)
+            st.success(f"Modèle sauvegardé dans : {model_path}")
             # Sauvegarde du test dans l'historique
             save_test_result({
                 'datetime': datetime.now().isoformat(),
@@ -268,7 +307,8 @@ with tabs[0]:
                 'resultats_eval': eval_result if 'eval_result' in locals() else None,
                 'score': score,
                 'reward_final': final_reward,
-                'eval_metrics': eval_metrics
+                'eval_metrics': eval_metrics,
+                'model_path': model_path
             })
 
     st.caption('Projet RL ESGI 2025 - Interface Streamlit')
@@ -314,3 +354,51 @@ with tabs[1]:
                     if test['eval_metrics'].get('learning_curve'):
                         st.markdown('**Courbe d’apprentissage (valeur moyenne par itération)**')
                         st.line_chart(test['eval_metrics']['learning_curve'], height=250, use_container_width=True) 
+
+# Onglet supplémentaire : Exécuter un modèle sauvegardé
+with st.tabs(["Exécution", "Historique des tests", "Exécuter un modèle sauvegardé"])[2]:
+    st.title("Exécuter un modèle sauvegardé sur GridWorld")
+    # Lister les modèles disponibles
+    model_files = glob.glob(os.path.join(os.path.dirname(__file__), '../models/*.pkl'))
+    model_files = [f for f in model_files if os.path.isfile(f) and f.endswith('.pkl')]
+    if not model_files:
+        st.warning("Aucun modèle .pkl trouvé dans le dossier models/.")
+    else:
+        model_choice = st.selectbox("Choisissez un modèle à charger", model_files, format_func=lambda x: os.path.basename(x))
+        if st.button("Charger et exécuter sur GridWorld"):
+            import pickle
+            from game import environments
+            # Charger le modèle
+            with open(model_choice, 'rb') as f:
+                model = pickle.load(f)
+            # Créer un nouvel environnement GridWorld (par défaut 5x5)
+            env = environments.GridWorld()
+            state = env.reset()
+            done = False
+            steps = 0
+            max_steps = 100
+            st.info("Exécution automatique du modèle sur GridWorld...")
+            table_placeholder = st.empty()
+            info_placeholder = st.empty()
+            while not done and steps < max_steps:
+                action = model.policy[state]
+                next_state, reward, done, info = env.step(action)
+                # Construction de la grille
+                grid = []
+                for r in range(env.n_rows):
+                    row = []
+                    for c in range(env.n_cols):
+                        idx = r * env.n_cols + c
+                        if idx == next_state:
+                            row.append('🟥')  # Agent
+                        elif idx in env.terminals:
+                            row.append('🏁')  # Terminal
+                        else:
+                            row.append('⬜')
+                    grid.append(row)
+                table_placeholder.table(grid)
+                info_placeholder.markdown(f"**Étape {steps}** | Reward: {reward} | Fini: {done}")
+                time.sleep(2)
+                state = next_state
+                steps += 1
+            st.success(f"Exécution terminée en {steps} étapes. Reward total: {env.total_reward}") 
