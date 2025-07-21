@@ -118,3 +118,5 @@ configparser>=5.0.0
 
 # Pour les environnements Conda :
 # conda install -c conda-forge numpy scipy matplotlib pandas gym jupyter joblib pytest 
+
+streamlit 
