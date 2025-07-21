@@ -1,0 +1,57 @@
+[
+  {
+    "datetime": "2025-07-21T10:22:21.501875",
+    "environnement": "LineWorld",
+    "modele": "PolicyIteration",
+    "hyperparametres": {
+      "gamma": 0.99,
+      "theta": 1e-06
+    },
+    "resultats_train": {
+      "policy": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+      ],
+      "V": [
+        99.99990136574546,
+        99.999902352088,
+        98.99990332856711,
+        98.00990429528144,
+        98.00990136574546,
+        98.99990136574546,
+        99.99990136574546,
+        99.99990136574546
+      ],
+      "history": [
+        {
+          "iteration": 1,
+          "avg_value": 24.99998767070626,
+          "max_value": 99.99990136574546,
+          "policy_stable": false
+        },
+        {
+          "iteration": 2,
+          "avg_value": 99.12988923439099,
+          "max_value": 99.999902352088,
+          "policy_stable": false
+        },
+        {
+          "iteration": 3,
+          "avg_value": 99.25240210058298,
+          "max_value": 99.999902352088,
+          "policy_stable": true
+        }
+      ],
+      "iterations": 3,
+      "converged": true
+    },
+    "resultats_eval": null,
+    "score": null
+  }
+]

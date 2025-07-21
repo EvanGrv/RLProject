@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Tuple, Dict, List, Optional, Any
 import random
 import math
+from itertools import combinations
 
 
 class BaseEnvironment(ABC):
@@ -51,6 +52,10 @@ class LineWorld(BaseEnvironment):
         self.terminals = [0, length-1]
         self.actions = [0, 1]
         self.reset()
+
+        # Ajout pour compatibilité Gym
+        self.observation_space = type('obj', (), {'n': self.length})()
+        self.action_space = type('obj', (), {'n': len(self.actions)})()
 
         # Matrice de transition et récompenses pour les algorithmes de programmation dynamique
         self._transition_matrix = self._build_transition_matrix()
@@ -439,8 +444,16 @@ class MontyHallParadox1(BaseEnvironment):
         
         # Maintenant on peut faire un vrai reset
         self.reset()
+        self._observation_space = type('obj', (), {'n': len(self.states)})()
+        self._action_space = type('obj', (), {'n': max(len(self.doors), len(self.A))})()
 
-    def reset(self):
+    def state_to_index(self, state):
+        return self.state_to_idx[state]
+
+    def index_to_state(self, idx):
+        return self.states[idx]
+
+    def reset(self, as_index=False):
         """Réinitialise l'environnement pour un nouvel épisode."""
         self._winning_door = random.choice(self.doors)
         self._revealed_door = None
@@ -448,11 +461,15 @@ class MontyHallParadox1(BaseEnvironment):
         
         # État observable : juste un indicateur qu'on est au début
         self.current_state = "initial"  
+        if as_index:
+            return self.state_to_index(self.current_state)
         return self.current_state
 
-    def step(self, action, is_dynamic_programming=False):
+    def step(self, action, is_dynamic_programming=False, as_index=False):
         """Exécute une action dans l'environnement."""
         if self.current_state == "terminal":
+            if as_index:
+                return self.state_to_index(self.current_state), 0.0, True, {}
             return self.current_state, 0.0, True, {}
         
         # Phase 1: Premier choix de porte
@@ -470,9 +487,21 @@ class MontyHallParadox1(BaseEnvironment):
             next_state = (action, self._revealed_door)
             
             if is_dynamic_programming:
-                return next_state, 0.0, False
+                if as_index:
+                    return self.state_to_index(next_state), 0.0, False
+                return next_state, 0.0, False, {
+                    'phase': 1,
+                    'door_chosen': ['A', 'B', 'C'][action],
+                    'door_revealed': ['A', 'B', 'C'][self._revealed_door] if self._revealed_door is not None else None
+                }
             
             self.current_state = next_state
+            if as_index:
+                return self.state_to_index(next_state), 0.0, False, {
+                    'phase': 1,
+                    'door_chosen': ['A', 'B', 'C'][action],
+                    'door_revealed': ['A', 'B', 'C'][self._revealed_door] if self._revealed_door is not None else None
+                }
             return next_state, 0.0, False, {
                 'phase': 1,
                 'door_chosen': ['A', 'B', 'C'][action],
@@ -503,8 +532,22 @@ class MontyHallParadox1(BaseEnvironment):
         self.current_state = next_state
         
         if is_dynamic_programming:
-            return next_state, reward, True
+            if as_index:
+                return self.state_to_index(next_state), reward, True
+            return next_state, reward, True, {
+                'phase': 2,
+                'final_choice': ['A', 'B', 'C'][final_choice],
+                'winning_door': ['A', 'B', 'C'][self._winning_door],
+                'action': 'resté' if action == 0 else 'changé'
+            }
             
+        if as_index:
+            return self.state_to_index(next_state), reward, True, {
+                'phase': 2,
+                'final_choice': ['A', 'B', 'C'][final_choice],
+                'winning_door': ['A', 'B', 'C'][self._winning_door],
+                'action': 'resté' if action == 0 else 'changé'
+            }
         return next_state, reward, True, {
             'phase': 2,
             'final_choice': ['A', 'B', 'C'][final_choice],
@@ -610,6 +653,19 @@ class MontyHallParadox1(BaseEnvironment):
             'gamma': 0.99
         }
 
+    def get_state_space(self):
+        return range(len(self.states))
+
+    def get_action_space(self):
+        return self.A
+
+    @property
+    def observation_space(self):
+        return self._observation_space
+
+    @property
+    def action_space(self):
+        return self._action_space
 
 
 # Qu'est ce que le Monty Hall Paradox 2 dans notre cas ?
@@ -651,21 +707,31 @@ class MontyHallParadox2(BaseEnvironment):
         
         # Maintenant on peut faire un vrai reset
         self.reset()
+        self._observation_space = type('obj', (), {'n': len(self.states)})()
+        self._action_space = type('obj', (), {'n': max(len(self.doors), len(self.A))})()
 
-    def reset(self):
+    def state_to_index(self, state):
+        return self.state_to_idx[state]
+
+    def index_to_state(self, idx):
+        return self.states[idx]
+
+    def reset(self, as_index=False):
         """Réinitialise l'environnement pour un nouvel épisode."""
         self._winning_door = random.choice(self.doors)
         self._revealed_doors = []
         self._current_choice = None
         self._phase = 0
-        
-        # État observable : juste un indicateur qu'on est au début
         self.current_state = "initial"
+        if as_index:
+            return self.state_to_index(self.current_state)
         return self.current_state
 
-    def step(self, action, is_dynamic_programming=False):
+    def step(self, action, is_dynamic_programming=False, as_index=False):
         """Exécute une action dans l'environnement."""
         if self.current_state == "terminal":
+            if as_index:
+                return self.state_to_index(self.current_state), 0.0, True, {}
             return self.current_state, 0.0, True, {}
             
         # Phase finale (4ème action) - décision rester/changer
@@ -691,8 +757,27 @@ class MontyHallParadox2(BaseEnvironment):
             self.current_state = next_state
             
             if is_dynamic_programming:
-                return next_state, reward, True
+                if as_index:
+                    return self.state_to_index(next_state), reward, True, {
+                        'phase': self._phase + 1,
+                        'final_choice': ['A', 'B', 'C', 'D', 'E'][final_choice],
+                        'winning_door': ['A', 'B', 'C', 'D', 'E'][self._winning_door],
+                        'action': 'resté' if action == 0 else 'changé'
+                    }
+                return next_state, reward, True, {
+                    'phase': self._phase + 1,
+                    'final_choice': ['A', 'B', 'C', 'D', 'E'][final_choice],
+                    'winning_door': ['A', 'B', 'C', 'D', 'E'][self._winning_door],
+                    'action': 'resté' if action == 0 else 'changé'
+                }
                 
+            if as_index:
+                return self.state_to_index(next_state), reward, True, {
+                    'phase': self._phase + 1,
+                    'final_choice': ['A', 'B', 'C', 'D', 'E'][final_choice],
+                    'winning_door': ['A', 'B', 'C', 'D', 'E'][self._winning_door],
+                    'action': 'resté' if action == 0 else 'changé'
+                }
             return next_state, reward, True, {
                 'phase': self._phase + 1,
                 'final_choice': ['A', 'B', 'C', 'D', 'E'][final_choice],
@@ -723,9 +808,21 @@ class MontyHallParadox2(BaseEnvironment):
         next_state = (self._phase, self._current_choice, tuple(sorted(self._revealed_doors)))
         
         if is_dynamic_programming:
-            return next_state, 0.0, False
+            if as_index:
+                return self.state_to_index(next_state), 0.0, False
+            return next_state, 0.0, False, {
+                'phase': self._phase,
+                'door_chosen': ['A', 'B', 'C', 'D', 'E'][action],
+                'door_revealed': ['A', 'B', 'C', 'D', 'E'][revealed] if available_for_reveal else None
+            }
         
         self.current_state = next_state
+        if as_index:
+            return self.state_to_index(next_state), 0.0, False, {
+                'phase': self._phase,
+                'door_chosen': ['A', 'B', 'C', 'D', 'E'][action],
+                'door_revealed': ['A', 'B', 'C', 'D', 'E'][revealed] if available_for_reveal else None
+            }
         return next_state, 0.0, False, {
             'phase': self._phase,
             'door_chosen': ['A', 'B', 'C', 'D', 'E'][action],
@@ -842,6 +939,19 @@ class MontyHallParadox2(BaseEnvironment):
             'gamma': 0.99
         }
 
+    def get_state_space(self):
+        return range(len(self.states))
+
+    def get_action_space(self):
+        return self.A
+
+    @property
+    def observation_space(self):
+        return self._observation_space
+
+    @property
+    def action_space(self):
+        return self._action_space
 
 
 # Two Round Rock Paper Scisssors
@@ -879,6 +989,8 @@ class RockPaperScissors:
         self.wins = 0
         self.total_games = 0
         self.reset()
+        self._observation_space = type('obj', (), {'n': self.n_states})()
+        self._action_space = type('obj', (), {'n': self.n_actions})()
 
     def reset(self):
         self.current_round = 0
@@ -994,6 +1106,20 @@ class RockPaperScissors:
             'terminals': [self.TERMINAL_DP],
             'gamma': 0.9
         }
+
+    def get_state_space(self):
+        return range(self.n_states)
+
+    def get_action_space(self):
+        return self.actions
+
+    @property
+    def observation_space(self):
+        return self._observation_space
+
+    @property
+    def action_space(self):
+        return self._action_space
 
 
 # Création d'un fichier __init__.py pour faire du dossier game un module Python
