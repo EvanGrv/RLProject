@@ -67,9 +67,13 @@ class DynaQ:
 
     def epsilon_greedy(self, s: int) -> int:
         """ε-greedy avec tie-breaking aléatoire."""
+        if hasattr(self.env, 'state_to_index') and not isinstance(s, int):
+            s_idx = self.env.state_to_index(s)
+        else:
+            s_idx = s
         if random.random() < self.epsilon:
             return random.randrange(self.nA)
-        q_s = self.Q[s]
+        q_s = self.Q[s_idx]
         best = np.flatnonzero(q_s == q_s.max())
         return int(random.choice(best))
 
@@ -105,6 +109,8 @@ class DynaQ:
         - phase de planning
         """
         s = self.env.reset()
+        if hasattr(self.env, 'state_to_index') and not isinstance(s, int):
+            s = self.env.state_to_index(s)
         total_reward = 0.0
         steps = 0
         done = False
@@ -112,16 +118,19 @@ class DynaQ:
         while not done and steps < 1000:
             a = self.epsilon_greedy(s)
             s2, r, done, _ = self.env.step(a)
-
+            if hasattr(self.env, 'state_to_index') and not isinstance(s2, int):
+                s2_idx = self.env.state_to_index(s2)
+            else:
+                s2_idx = s2
             # 1) apprentissage réel
-            self.q_update(s, a, r, s2)
+            self.q_update(s, a, r, s2_idx)
             # 2) mise à jour du modèle
-            self.update_model(s, a, r, s2)
+            self.update_model(s, a, r, s2_idx)
             # 3) planification
             self.planning()
 
             total_reward += r
-            s = s2
+            s = s2_idx
             steps += 1
 
         return {'reward': total_reward, 'steps': steps}
@@ -170,18 +179,26 @@ class DynaQ:
 
         for _ in range(num_episodes):
             s = self.env.reset()
+            if hasattr(self.env, 'state_to_index') and not isinstance(s, int):
+                s = self.env.state_to_index(s)
             done, G, steps = False, 0.0, 0
             while not done and steps < 1000:
                 a = self.policy[s]
-                s, r, done, _ = self.env.step(a)
+                s2, r, done, _ = self.env.step(a)
+                if hasattr(self.env, 'state_to_index') and not isinstance(s2, int):
+                    s = self.env.state_to_index(s2)
+                else:
+                    s = s2
                 G += r; steps += 1
             rewards.append(G); lengths.append(steps)
 
         self.epsilon = old_eps
+        learning_curve = [h['reward'] for h in self.history] if self.history else []
         return {
             'avg_reward': np.mean(rewards),
             'std_reward': np.std(rewards),
-            'avg_steps':  np.mean(lengths)
+            'avg_steps':  np.mean(lengths),
+            'learning_curve': learning_curve
         }
 
     def save(self, path: str):
@@ -302,6 +319,8 @@ class DynaQPlus:
         2) planification
         """
         s = self.env.reset()
+        if hasattr(self.env, 'state_to_index') and not isinstance(s, int):
+            s = self.env.state_to_index(s)
         total_reward = 0.0
         steps = 0
         done = False
@@ -309,15 +328,18 @@ class DynaQPlus:
         while not done and steps < 1000:
             a = self.epsilon_greedy(s)
             s2, r, done, _ = self.env.step(a)
-
+            if hasattr(self.env, 'state_to_index') and not isinstance(s2, int):
+                s2_idx = self.env.state_to_index(s2)
+            else:
+                s2_idx = s2
             # 1) apprentissage réel
-            self._update_q(s, a, r, s2)
-            self._update_model(s, a, r, s2)
+            self._update_q(s, a, r, s2_idx)
+            self._update_model(s, a, r, s2_idx)
             # 2) planification
             self._planning()
 
             total_reward += r
-            s = s2
+            s = s2_idx
             steps += 1
 
         return {'reward': total_reward, 'steps': steps, 'time': self.time}
@@ -358,7 +380,7 @@ class DynaQPlus:
             'model':   self.model
         }
 
-    def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
+    def evaluate(self, num_episodes: int = 100) -> Dict[str, Any]:
         """Évalue la politique gloutonne (ε=0)."""
         old_eps = self.epsilon
         self.epsilon = 0.0
@@ -366,18 +388,26 @@ class DynaQPlus:
 
         for _ in range(num_episodes):
             s = self.env.reset()
+            if hasattr(self.env, 'state_to_index') and not isinstance(s, int):
+                s = self.env.state_to_index(s)
             done, G, steps = False, 0.0, 0
             while not done and steps < 1000:
                 a = self.policy[s]
-                s, r, done, _ = self.env.step(a)
+                s2, r, done, _ = self.env.step(a)
+                if hasattr(self.env, 'state_to_index') and not isinstance(s2, int):
+                    s = self.env.state_to_index(s2)
+                else:
+                    s = s2
                 G += r; steps += 1
             rewards.append(G); lengths.append(steps)
 
         self.epsilon = old_eps
+        learning_curve = [h['reward'] for h in self.history] if self.history else []
         return {
-            'avg_reward': np.mean(rewards),
-            'std_reward': np.std(rewards),
-            'avg_steps':  np.mean(lengths)
+            'avg_reward': float(np.mean(rewards)),
+            'std_reward': float(np.std(rewards)),
+            'avg_steps':  float(np.mean(lengths)),
+            'learning_curve': [float(x) for x in learning_curve]
         }
 
     def save(self, path: str):

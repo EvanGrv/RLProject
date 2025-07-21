@@ -181,6 +181,7 @@ class Sarsa:
     def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
         """
         Évalue la politique gloutonne (ε=0) pendant num_episodes épisodes.
+        Ajoute la courbe d'apprentissage (rewards par épisode d'entraînement).
         """
         old_eps = self.epsilon
         self.epsilon = 0.0
@@ -200,11 +201,14 @@ class Sarsa:
             if G>0: success += 1
 
         self.epsilon = old_eps
+        # Courbe d'apprentissage = reward par épisode d'entraînement
+        learning_curve = [h['reward'] for h in self.history] if self.history else []
         return {
-            'avg_reward':    np.mean(rewards),
-            'std_reward':    np.std(rewards),
-            'success_rate':  success/num_episodes,
-            'avg_steps':     np.mean(lengths)
+            'avg_reward': float(np.mean(rewards)),
+            'std_reward': float(np.std(rewards)),
+            'success_rate': float(success/num_episodes),
+            'avg_steps': float(np.mean(lengths)),
+            'learning_curve': [float(r) for r in learning_curve]
         }
 
     def save(self, filepath: str):
@@ -273,9 +277,13 @@ class QLearning:
 
     def epsilon_greedy(self, state: int) -> int:
         """Sélectionne une action selon ε-greedy sur Q[state]."""
+        if hasattr(self.env, 'state_to_index') and not isinstance(state, int):
+            state_idx = self.env.state_to_index(state)
+        else:
+            state_idx = state
         if random.random() < self.epsilon:
             return random.randrange(self.nA)
-        q_s = self.Q[state]
+        q_s = self.Q[state_idx]
         max_q = np.max(q_s)
         best_actions = np.flatnonzero(q_s == max_q)
         return int(random.choice(best_actions))
@@ -291,6 +299,8 @@ class QLearning:
              s ← s'
         """
         state = self.env.reset()
+        if hasattr(self.env, 'state_to_index') and not isinstance(state, int):
+            state = self.env.state_to_index(state)
         total_reward = 0.0
         total_td2 = 0.0
         steps = 0
@@ -299,9 +309,11 @@ class QLearning:
         while not done and steps < 1000:
             action = self.epsilon_greedy(state)
             next_state, reward, done, _ = self.env.step(action)
-
-            # TD-target et TD-error
-            best_next = np.max(self.Q[next_state])
+            if hasattr(self.env, 'state_to_index') and not isinstance(next_state, int):
+                next_state_idx = self.env.state_to_index(next_state)
+            else:
+                next_state_idx = next_state
+            best_next = np.max(self.Q[next_state_idx])
             td_target = reward + self.gamma * best_next
             td_error  = td_target - self.Q[state, action]
 
@@ -310,7 +322,7 @@ class QLearning:
 
             total_reward += reward
             total_td2 += td_error ** 2
-            state = next_state
+            state = next_state_idx
             steps += 1
 
         avg_loss = total_td2 / steps if steps > 0 else 0.0
@@ -352,6 +364,7 @@ class QLearning:
     def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
         """
         Évalue la policy gloutonne (ε=0) sur num_episodes.
+        Ajoute la courbe d'apprentissage (rewards par épisode d'entraînement).
         """
         old_eps = self.epsilon
         self.epsilon = 0.0
@@ -359,18 +372,26 @@ class QLearning:
         rewards, lengths = [], []
         for _ in range(num_episodes):
             state = self.env.reset()
+            if hasattr(self.env, 'state_to_index') and not isinstance(state, int):
+                state = self.env.state_to_index(state)
             done, G, steps = False, 0.0, 0
             while not done and steps < 1000:
                 a = self.policy[state]
-                state, r, done, _ = self.env.step(a)
+                next_state, r, done, _ = self.env.step(a)
+                if hasattr(self.env, 'state_to_index') and not isinstance(next_state, int):
+                    state = self.env.state_to_index(next_state)
+                else:
+                    state = next_state
                 G += r; steps += 1
             rewards.append(G); lengths.append(steps)
 
         self.epsilon = old_eps
+        learning_curve = [h['reward'] for h in self.history] if self.history else []
         return {
-            'avg_reward': np.mean(rewards),
-            'std_reward': np.std(rewards),
-            'avg_steps':  np.mean(lengths)
+            'avg_reward': float(np.mean(rewards)),
+            'std_reward': float(np.std(rewards)),
+            'avg_steps':  float(np.mean(lengths)),
+            'learning_curve': [float(r) for r in learning_curve]
         }
 
     def save(self, filepath: str):
@@ -468,6 +489,8 @@ class ExpectedSarsa:
           s ← s'
         """
         state = self.env.reset()
+        if hasattr(self.env, 'state_to_index') and not isinstance(state, int):
+            state = self.env.state_to_index(state)
         total_reward = 0.0
         total_td2 = 0.0
         steps = 0
@@ -476,16 +499,20 @@ class ExpectedSarsa:
         while not done and steps < 1000:
             action = self.epsilon_greedy(state)
             next_state, reward, done, _ = self.env.step(action)
+            if hasattr(self.env, 'state_to_index') and not isinstance(next_state, int):
+                next_state_idx = self.env.state_to_index(next_state)
+            else:
+                next_state_idx = next_state
 
             # calcul de l'espérance
-            exp_q_next = 0.0 if done else self.expected_q(next_state)
+            exp_q_next = 0.0 if done else self.expected_q(next_state_idx)
             td_target = reward + self.gamma * exp_q_next
             td_error  = td_target - self.Q[state, action]
             self.Q[state, action] += self.alpha * td_error
 
             total_reward += reward
             total_td2 += td_error ** 2
-            state = next_state
+            state = next_state_idx
             steps += 1
 
         avg_loss = total_td2 / steps if steps > 0 else 0.0
@@ -521,25 +548,35 @@ class ExpectedSarsa:
         return {'Q': self.Q, 'policy': self.policy, 'history': self.history}
 
     def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
-        """Évalue la politique gloutonne (ε=0)."""
+        """
+        Évalue la politique gloutonne (ε=0). Ajoute la courbe d'apprentissage (rewards par épisode d'entraînement).
+        """
         old_eps = self.epsilon
         self.epsilon = 0.0
 
         rewards, lengths = [], []
         for _ in range(num_episodes):
             state = self.env.reset()
+            if hasattr(self.env, 'state_to_index') and not isinstance(state, int):
+                state = self.env.state_to_index(state)
             done, G, steps = False, 0.0, 0
             while not done and steps < 1000:
                 a = self.policy[state]
-                state, r, done, _ = self.env.step(a)
+                next_state, r, done, _ = self.env.step(a)
+                if hasattr(self.env, 'state_to_index') and not isinstance(next_state, int):
+                    state = self.env.state_to_index(next_state)
+                else:
+                    state = next_state
                 G += r; steps += 1
             rewards.append(G); lengths.append(steps)
 
         self.epsilon = old_eps
+        learning_curve = [h['reward'] for h in self.history] if self.history else []
         return {
-            'avg_reward': np.mean(rewards),
-            'std_reward': np.std(rewards),
-            'avg_steps':  np.mean(lengths)
+            'avg_reward': float(np.mean(rewards)),
+            'std_reward': float(np.std(rewards)),
+            'avg_steps':  float(np.mean(lengths)),
+            'learning_curve': [float(r) for r in learning_curve]
         }
 
     def save(self, filepath: str):
