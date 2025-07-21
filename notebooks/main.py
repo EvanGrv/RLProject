@@ -203,6 +203,31 @@ with tabs[0]:
             train_display = dict(result) if result else {}
             train_display.pop('history', None)
             st.write("**Résultats entraînement :**", train_display)
+
+            # Affichage de la courbe d'entraînement Policy Iteration/Value Iteration si disponible
+            if result and 'history' in result and result['history'] and model_name in ['PolicyIteration', 'ValueIteration']:
+                history = result['history']
+                iterations = [h['iteration'] for h in history]
+                avg_values = [h['avg_value'] for h in history]
+                max_values = [h['max_value'] for h in history]
+                policy_stable = [h.get('policy_stable', False) for h in history]
+
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=(7, 4))
+                ax.plot(iterations, avg_values, 'b-', label='V moyen', linewidth=2)
+                ax.plot(iterations, max_values, 'r--', label='V max', linewidth=2)
+                # Points où la politique est stable
+                stable_points = [i for i, stable in enumerate(policy_stable) if stable]
+                if stable_points:
+                    ax.scatter([iterations[i] for i in stable_points],
+                               [avg_values[i] for i in stable_points],
+                               color='green', s=50, zorder=5, label='Politique stable')
+                ax.set_title('Courbe d\'entraînement (Policy Iteration)')
+                ax.set_xlabel('Itération')
+                ax.set_ylabel('Valeur V')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                st.pyplot(fig)
             
             # Affichage du score final si disponible
             score = None

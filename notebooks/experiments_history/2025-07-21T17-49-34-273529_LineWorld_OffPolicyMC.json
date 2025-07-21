@@ -1,0 +1,912 @@
+{
+  "datetime": "2025-07-21T17:49:34.273529",
+  "environnement": "LineWorld",
+  "modele": "OffPolicyMC",
+  "hyperparametres": {
+    "gamma": 0.99,
+    "epsilon": 0.1,
+    "num_episodes": 100
+  },
+  "resultats_train": {
+    "Q": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        -1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ]
+    ],
+    "policy": [
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "history": [
+      {
+        "episode": 1,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 4
+      },
+      {
+        "episode": 2,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 30
+      },
+      {
+        "episode": 3,
+        "reward": -5.0,
+        "avg_q": -0.0625,
+        "episode_length": 86
+      },
+      {
+        "episode": 4,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 4
+      },
+      {
+        "episode": 5,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 22
+      },
+      {
+        "episode": 6,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 62
+      },
+      {
+        "episode": 7,
+        "reward": -5.0,
+        "avg_q": -0.0625,
+        "episode_length": 150
+      },
+      {
+        "episode": 8,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 4
+      },
+      {
+        "episode": 9,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 32
+      },
+      {
+        "episode": 10,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 24
+      },
+      {
+        "episode": 11,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 6
+      },
+      {
+        "episode": 12,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 90
+      },
+      {
+        "episode": 13,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 98
+      },
+      {
+        "episode": 14,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 36
+      },
+      {
+        "episode": 15,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 14
+      },
+      {
+        "episode": 16,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 6
+      },
+      {
+        "episode": 17,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 4
+      },
+      {
+        "episode": 18,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 70
+      },
+      {
+        "episode": 19,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 14
+      },
+      {
+        "episode": 20,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 38
+      },
+      {
+        "episode": 21,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 122
+      },
+      {
+        "episode": 22,
+        "reward": -5.0,
+        "avg_q": -0.0625,
+        "episode_length": 52
+      },
+      {
+        "episode": 23,
+        "reward": -3.0,
+        "avg_q": -0.0625,
+        "episode_length": 122
+      },
+      {
+        "episode": 24,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 98
+      },
+      {
+        "episode": 25,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 6
+      },
+      {
+        "episode": 26,
+        "reward": -5.0,
+        "avg_q": -0.0625,
+        "episode_length": 116
+      },
+      {
+        "episode": 27,
+        "reward": -3.0,
+        "avg_q": -0.0625,
+        "episode_length": 128
+      },
+      {
+        "episode": 28,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 88
+      },
+      {
+        "episode": 29,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 4
+      },
+      {
+        "episode": 30,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 42
+      },
+      {
+        "episode": 31,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 36
+      },
+      {
+        "episode": 32,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 72
+      },
+      {
+        "episode": 33,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 46
+      },
+      {
+        "episode": 34,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 44
+      },
+      {
+        "episode": 35,
+        "reward": -3.0,
+        "avg_q": -0.0625,
+        "episode_length": 104
+      },
+      {
+        "episode": 36,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 18
+      },
+      {
+        "episode": 37,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 14
+      },
+      {
+        "episode": 38,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 18
+      },
+      {
+        "episode": 39,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 108
+      },
+      {
+        "episode": 40,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 66
+      },
+      {
+        "episode": 41,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 62
+      },
+      {
+        "episode": 42,
+        "reward": -3.0,
+        "avg_q": -0.0625,
+        "episode_length": 62
+      },
+      {
+        "episode": 43,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 10
+      },
+      {
+        "episode": 44,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 32
+      },
+      {
+        "episode": 45,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 14
+      },
+      {
+        "episode": 46,
+        "reward": -5.0,
+        "avg_q": -0.0625,
+        "episode_length": 82
+      },
+      {
+        "episode": 47,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 214
+      },
+      {
+        "episode": 48,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 80
+      },
+      {
+        "episode": 49,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 18
+      },
+      {
+        "episode": 50,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 14
+      },
+      {
+        "episode": 51,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 28
+      },
+      {
+        "episode": 52,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 106
+      },
+      {
+        "episode": 53,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 8
+      },
+      {
+        "episode": 54,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 4
+      },
+      {
+        "episode": 55,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 76
+      },
+      {
+        "episode": 56,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 50
+      },
+      {
+        "episode": 57,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 6
+      },
+      {
+        "episode": 58,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 10
+      },
+      {
+        "episode": 59,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 12
+      },
+      {
+        "episode": 60,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 14
+      },
+      {
+        "episode": 61,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 76
+      },
+      {
+        "episode": 62,
+        "reward": -6.0,
+        "avg_q": -0.0625,
+        "episode_length": 204
+      },
+      {
+        "episode": 63,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 72
+      },
+      {
+        "episode": 64,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 18
+      },
+      {
+        "episode": 65,
+        "reward": -3.0,
+        "avg_q": -0.0625,
+        "episode_length": 78
+      },
+      {
+        "episode": 66,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 34
+      },
+      {
+        "episode": 67,
+        "reward": -5.0,
+        "avg_q": -0.0625,
+        "episode_length": 82
+      },
+      {
+        "episode": 68,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 84
+      },
+      {
+        "episode": 69,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 16
+      },
+      {
+        "episode": 70,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 32
+      },
+      {
+        "episode": 71,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 42
+      },
+      {
+        "episode": 72,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 6
+      },
+      {
+        "episode": 73,
+        "reward": -5.0,
+        "avg_q": -0.0625,
+        "episode_length": 170
+      },
+      {
+        "episode": 74,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 46
+      },
+      {
+        "episode": 75,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 16
+      },
+      {
+        "episode": 76,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 44
+      },
+      {
+        "episode": 77,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 64
+      },
+      {
+        "episode": 78,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 12
+      },
+      {
+        "episode": 79,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 92
+      },
+      {
+        "episode": 80,
+        "reward": -3.0,
+        "avg_q": -0.0625,
+        "episode_length": 44
+      },
+      {
+        "episode": 81,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 60
+      },
+      {
+        "episode": 82,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 38
+      },
+      {
+        "episode": 83,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 36
+      },
+      {
+        "episode": 84,
+        "reward": -7.0,
+        "avg_q": -0.0625,
+        "episode_length": 48
+      },
+      {
+        "episode": 85,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 62
+      },
+      {
+        "episode": 86,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 8
+      },
+      {
+        "episode": 87,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 4
+      },
+      {
+        "episode": 88,
+        "reward": -5.0,
+        "avg_q": -0.0625,
+        "episode_length": 52
+      },
+      {
+        "episode": 89,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 12
+      },
+      {
+        "episode": 90,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 12
+      },
+      {
+        "episode": 91,
+        "reward": -5.0,
+        "avg_q": -0.0625,
+        "episode_length": 116
+      },
+      {
+        "episode": 92,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 134
+      },
+      {
+        "episode": 93,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 36
+      },
+      {
+        "episode": 94,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 16
+      },
+      {
+        "episode": 95,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 98
+      },
+      {
+        "episode": 96,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 8
+      },
+      {
+        "episode": 97,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 22
+      },
+      {
+        "episode": 98,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 32
+      },
+      {
+        "episode": 99,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 56
+      },
+      {
+        "episode": 100,
+        "reward": -4.0,
+        "avg_q": -0.0625,
+        "episode_length": 24
+      }
+    ],
+    "C": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        100.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0
+      ]
+    ]
+  },
+  "resultats_eval": {
+    "average_reward": -4.0,
+    "std_reward": 0.0,
+    "success_rate": 0.0,
+    "average_steps": 4.0,
+    "std_steps": 0.0,
+    "learning_curve": [
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -3.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -3.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -3.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -3.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -6.0,
+      -4.0,
+      -4.0,
+      -3.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -3.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -7.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0
+    ]
+  },
+  "score": -4.0,
+  "reward_final": null,
+  "eval_metrics": {
+    "avg_reward": null,
+    "min_reward": null,
+    "max_reward": null,
+    "iterations": null,
+    "execution_time": null,
+    "learning_curve": [
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -3.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -3.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -3.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -3.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -6.0,
+      -4.0,
+      -4.0,
+      -3.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -3.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -7.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -5.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0,
+      -4.0
+    ]
+  }
+}

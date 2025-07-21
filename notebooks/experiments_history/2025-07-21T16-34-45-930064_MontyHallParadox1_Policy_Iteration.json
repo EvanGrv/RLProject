@@ -1,0 +1,48 @@
+{
+  "datetime": "2025-07-21T16:34:45.930064",
+  "environnement": "MontyHallParadox1",
+  "modele": "Policy Iteration",
+  "hyperparametres": {},
+  "resultats_train": {
+    "policy": [
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0
+    ],
+    "V": [
+      0.6,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.0
+    ],
+    "history": [
+      {
+        "iteration": 1,
+        "avg_value": 0.3895833333333333,
+        "max_value": 0.6666666666666666,
+        "policy_stable": false
+      },
+      {
+        "iteration": 2,
+        "avg_value": 0.575,
+        "max_value": 0.6666666666666666,
+        "policy_stable": true
+      }
+    ],
+    "iterations": 2,
+    "converged": true
+  },
+  "resultats_eval": null,
+  "score": null,
+  "reward_final": null,
+  "eval_metrics": {}
+}
