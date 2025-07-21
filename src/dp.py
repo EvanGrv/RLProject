@@ -12,6 +12,7 @@ lorsque la dynamique de l'environnement est connue.
 import numpy as np
 from typing import Dict, Tuple, Optional, Any, List
 from src.utils_io import save_model, load_model
+import time
 
 
 # ALGORITHME POLICY ITERATION
@@ -196,6 +197,39 @@ class PolicyIteration:
             'history': self.history,
             'iterations': iteration,
             'converged': policy_stable if 'policy_stable' in locals() else False
+        }
+    
+    def evaluate(self, num_episodes: int = 100) -> dict:
+        """
+        Évalue la politique trouvée sur l'environnement.
+        Retourne récompense moyenne, min, max, nb itérations, temps d'exécution, courbe d'apprentissage.
+        """
+        rewards = []
+        steps_list = []
+        start = time.time()
+        for _ in range(num_episodes):
+            state = self.env.reset()
+            done, G, steps = False, 0.0, 0
+            while not done and steps < 1000:
+                a = self.policy[state]
+                state, r, done, _ = self.env.step(a)
+                G += r
+                steps += 1
+            rewards.append(G)
+            steps_list.append(steps)
+        elapsed = time.time() - start
+        # Courbe d'apprentissage = historique des valeurs moyennes par itération
+        learning_curve = [h['avg_value'] for h in self.history] if self.history else []
+        return {
+            'avg_reward': float(np.mean(rewards)),
+            'min_reward': float(np.min(rewards)),
+            'max_reward': float(np.max(rewards)),
+            'iterations': len(self.history),
+            'converged': self.history[-1]['policy_stable'] if self.history else None,
+            'execution_time': elapsed,
+            'learning_curve': learning_curve,
+            'rewards': rewards,
+            'steps_per_episode': steps_list
         }
     
     def _initialize_mdp_structures(self):
@@ -462,6 +496,40 @@ class ValueIteration:
             'iterations': iteration,
             'converged': converged,
             'final_delta': delta if 'delta' in locals() else None
+        }
+    
+    def evaluate(self, num_episodes: int = 100) -> dict:
+        """
+        Évalue la politique trouvée sur l'environnement.
+        Retourne récompense moyenne, min, max, nb itérations, temps d'exécution, courbe d'apprentissage.
+        """
+        rewards = []
+        steps_list = []
+        start = time.time()
+        # Politique déterministe extraite de self.policy (matrice one-hot)
+        policy_indices = np.argmax(self.policy, axis=1) if self.policy is not None else None
+        for _ in range(num_episodes):
+            state = self.env.reset()
+            done, G, steps = False, 0.0, 0
+            while not done and steps < 1000:
+                a = policy_indices[state] if policy_indices is not None else 0
+                state, r, done, _ = self.env.step(a)
+                G += r
+                steps += 1
+            rewards.append(G)
+            steps_list.append(steps)
+        elapsed = time.time() - start
+        learning_curve = [h['avg_value'] for h in self.history] if self.history else []
+        return {
+            'avg_reward': float(np.mean(rewards)),
+            'min_reward': float(np.min(rewards)),
+            'max_reward': float(np.max(rewards)),
+            'iterations': len(self.history),
+            'converged': self.history[-1]['converged'] if self.history else None,
+            'execution_time': elapsed,
+            'learning_curve': learning_curve,
+            'rewards': rewards,
+            'steps_per_episode': steps_list
         }
     
     def _initialize_mdp_structures(self):

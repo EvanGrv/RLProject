@@ -37,9 +37,9 @@ class MonteCarloES:
         self.gamma = gamma
         self.Q = None
         self.policy = None
-        self.returns_sum = {}
-        self.returns_count = {}
-        self.history = []
+        self.returns_sum: dict = {}
+        self.returns_count: dict = {}
+        self.history: list = []
         
         # Initialiser les structures MDP
         self._initialize_mdp_structures()
@@ -326,6 +326,44 @@ class MonteCarloES:
         self.returns_sum = model_data['returns_sum']
         self.returns_count = model_data['returns_count']
 
+    def evaluate(self, num_episodes: int = 100) -> dict:
+        """
+        Évalue la politique trouvée sur l'environnement.
+        Retourne récompense moyenne, min, max, temps d'exécution, courbe d'apprentissage.
+        """
+        import numpy as np
+        rewards = []
+        steps_list = []
+        import time
+        start = time.time()
+        for _ in range(num_episodes):
+            state = self.env.reset()
+            done, G, steps = False, 0.0, 0
+            while not done and steps < 1000:
+                # Patch : conversion état complexe -> index si nécessaire
+                if hasattr(self.env, 'state_to_index'):
+                    state_idx = self.env.state_to_index(state)
+                else:
+                    state_idx = state
+                a = self.policy[state_idx]
+                next_state, r, done, _ = self.env.step(a)
+                G += r
+                steps += 1
+                state = next_state
+            rewards.append(G)
+            steps_list.append(steps)
+        elapsed = time.time() - start
+        learning_curve = [float(h['avg_q_value']) for h in self.history] if self.history else []
+        return {
+            'avg_reward': float(np.mean(rewards)) if rewards else 0.0,
+            'min_reward': float(np.min(rewards)) if rewards else 0.0,
+            'max_reward': float(np.max(rewards)) if rewards else 0.0,
+            'execution_time': elapsed,
+            'learning_curve': learning_curve,
+            'rewards': rewards,
+            'steps_per_episode': steps_list
+        }
+
 
 class OnPolicyMC:
     """
@@ -357,12 +395,23 @@ class OnPolicyMC:
         if hasattr(self.env, 'nS') and hasattr(self.env, 'nA'):
             self.nS, self.nA = self.env.nS, self.env.nA
         else:
-            # Gym standard
-            self.nS = getattr(self.env.observation_space, 'n', None)
-            self.nA = getattr(self.env.action_space, 'n', None)
-            if self.nS is None or self.nA is None:
-                raise ValueError("Impossible de déterminer nS ou nA.")
-        # Valeurs initiales
+            # Gym standard ou environnement custom
+            if hasattr(self.env, 'get_state_space'):
+                self.nS = len(self.env.get_state_space())
+            elif hasattr(self.env, 'observation_space'):
+                self.nS = getattr(self.env.observation_space, 'n', None)
+            else:
+                self.nS = None
+            if hasattr(self.env, 'get_action_space'):
+                self.nA = len(self.env.get_action_space())
+            elif hasattr(self.env, 'action_space'):
+                self.nA = getattr(self.env.action_space, 'n', None)
+            else:
+                self.nA = 2  # fallback
+        # Contrôle strict
+        if not isinstance(self.nS, int) or not isinstance(self.nA, int) or self.nS <= 0 or self.nA <= 0:
+            print(f"[ERREUR INIT] nS={self.nS}, nA={self.nA}")
+            raise ValueError(f"nS ou nA mal initialisé : nS={self.nS}, nA={self.nA}")
         self.Q = np.zeros((self.nS, self.nA), dtype=float)
         self.policy = np.zeros(self.nS, dtype=int)
         self.returns_sum   = defaultdict(float)  # clé = (s,a)
@@ -370,10 +419,14 @@ class OnPolicyMC:
 
     def epsilon_greedy_action(self, state: int) -> int:
         """Sélectionne a selon ε-greedy sur Q[state]."""
+        if hasattr(self.env, 'state_to_index') and not isinstance(state, int):
+            state_idx = self.env.state_to_index(state)
+        else:
+            state_idx = state
         if random.random() < self.epsilon:
             return random.randrange(self.nA)
         # tie-breaking aléatoire
-        q_s = self.Q[state]
+        q_s = self.Q[state_idx]
         max_val = np.max(q_s)
         best = np.flatnonzero(q_s == max_val)
         return int(random.choice(best))
@@ -406,12 +459,20 @@ class OnPolicyMC:
         seen = set()
         # on parcourt à l’envers
         for s, a, r in reversed(episode):
+            # Patch : ignorer les transitions où l'action n'est pas valide
+            if not (0 <= a < self.nA):
+                continue
             G = self.gamma * G + r
             if (s,a) not in seen:
                 seen.add((s,a))
                 self.returns_count[(s,a)] += 1
                 self.returns_sum[(s,a)]   += G
-                self.Q[s,a] = self.returns_sum[(s,a)] / self.returns_count[(s,a)]
+                if hasattr(self.env, 'state_to_index') and not isinstance(s, int):
+                    s_idx = self.env.state_to_index(s)
+                else:
+                    s_idx = s
+                a_idx = a % self.nA
+                self.Q[s_idx, a_idx] = self.returns_sum[(s,a)] / self.returns_count[(s,a)]
 
     def improve_policy(self):
         """Rend la policy gloutonne par rapport à Q (tie-break aléatoire)."""
@@ -419,7 +480,11 @@ class OnPolicyMC:
             q_s = self.Q[s]
             max_val = np.max(q_s)
             best = np.flatnonzero(q_s == max_val)
-            self.policy[s] = int(random.choice(best))
+            # Patch : s'assurer que l'action est dans [0, nA-1]
+            action = int(random.choice(best))
+            if action >= self.nA:
+                action = action % self.nA
+            self.policy[s] = action
 
     def train(self, num_episodes: int = 1000) -> Dict[str,Any]:
         """
@@ -475,18 +540,25 @@ class OnPolicyMC:
             state = obs if not hasattr(self.env, 'state') else self.env.state
             done, G, steps = False, 0.0, 0
             while not done and steps < 1000:
-                a = self.policy[state]
-                state, r, done, _ = self.env.step(a)
+                if hasattr(self.env, 'state_to_index') and not isinstance(state, int):
+                    state_idx = self.env.state_to_index(state)
+                else:
+                    state_idx = state
+                a = self.policy[state_idx]
+                next_obs, r, done, _ = self.env.step(a)
+                state = next_obs
                 G += r; steps += 1
             rewards.append(G); lengths.append(steps)
             if G > 0: succ += 1
 
         self.epsilon = old_eps
+        learning_curve = [h['reward'] for h in self.history] if self.history else []
         return {
             'avg_reward': np.mean(rewards),
             'std_reward': np.std(rewards),
             'success_rate': succ/num_episodes,
-            'avg_length': np.mean(lengths)
+            'avg_length': np.mean(lengths),
+            'learning_curve': learning_curve
         }
 
     def get_action(self, state: int) -> int:
@@ -547,25 +619,25 @@ class OffPolicyMC:
         """Initialise les structures MDP nécessaires."""
         # Déterminer le nombre d'états et d'actions
         if hasattr(self.env, 'nS') and hasattr(self.env, 'nA'):
-            # Environnement gym discret
             self.nS = self.env.nS
             self.nA = self.env.nA
-        elif hasattr(self.env, 'observation_space') and hasattr(self.env, 'action_space'):
-            # Environnement gym avec observation/action spaces
-            self.nS = getattr(self.env.observation_space, 'n', 16)
-            self.nA = getattr(self.env.action_space, 'n', 4)
         else:
-            # Environnement personnalisé - essayer d'obtenir les infos MDP
-            if hasattr(self.env, 'get_mdp_info'):
-                mdp_info = self.env.get_mdp_info()
-                self.nS = len(list(mdp_info['states']))
-                self.nA = len(mdp_info['actions'])
+            if hasattr(self.env, 'get_state_space'):
+                self.nS = len(self.env.get_state_space())
+            elif hasattr(self.env, 'observation_space'):
+                self.nS = getattr(self.env.observation_space, 'n', None)
             else:
-                # Valeurs par défaut
-                self.nS = 16
-                self.nA = 4
-        
-        # Initialiser Q, politique cible et poids cumulatifs
+                self.nS = None
+            if hasattr(self.env, 'get_action_space'):
+                self.nA = len(self.env.get_action_space())
+            elif hasattr(self.env, 'action_space'):
+                self.nA = getattr(self.env.action_space, 'n', None)
+            else:
+                self.nA = 2  # fallback
+        # Contrôle strict
+        if not isinstance(self.nS, int) or not isinstance(self.nA, int) or self.nS <= 0 or self.nA <= 0:
+            print(f"[ERREUR INIT OffPolicyMC] nS={self.nS}, nA={self.nA}")
+            raise ValueError(f"nS ou nA mal initialisé : nS={self.nS}, nA={self.nA}")
         self.Q = np.zeros((self.nS, self.nA), dtype=float)
         self.target_policy = np.zeros(self.nS, dtype=int)
         self.C = np.zeros((self.nS, self.nA), dtype=float)
@@ -580,10 +652,14 @@ class OffPolicyMC:
         Returns:
             Action choisie
         """
+        if hasattr(self.env, 'state_to_index') and not isinstance(state, int):
+            state_idx = self.env.state_to_index(state)
+        else:
+            state_idx = state
         if random.random() < self.epsilon:
             return random.randint(0, self.nA - 1)
         else:
-            return np.argmax(self.Q[state])
+            return np.argmax(self.Q[state_idx])
     
     def generate_episode(self) -> List[Tuple[int, int, float]]:
         """
@@ -697,44 +773,39 @@ class OffPolicyMC:
     def evaluate(self, num_episodes: int = 100) -> Dict[str, float]:
         """
         Évalue la politique cible apprise.
-        
-        Args:
-            num_episodes: Nombre d'épisodes d'évaluation
-            
-        Returns:
-            Dictionnaire avec les métriques d'évaluation
+        Retourne les métriques + courbe d'apprentissage.
         """
         if self.target_policy is None:
             raise ValueError("Aucune politique disponible. Entraînez d'abord l'algorithme.")
-        
         total_rewards = []
         total_steps = []
         successes = 0
-        
         for _ in range(num_episodes):
             state = self.env.reset()
             episode_reward = 0
             steps = 0
             done = False
-            
             while not done and steps < 1000:
-                action = self.target_policy[state]
-                state, reward, done, _ = self.env.step(action)
+                if hasattr(self.env, 'state_to_index') and not isinstance(state, int):
+                    state_idx = self.env.state_to_index(state)
+                else:
+                    state_idx = state
+                action = self.target_policy[state_idx]
+                next_state, reward, done, _ = self.env.step(action)
                 episode_reward += reward
                 steps += 1
-            
             total_rewards.append(episode_reward)
             total_steps.append(steps)
-            
             if episode_reward > 0:
                 successes += 1
-        
+        learning_curve = [h['reward'] for h in self.history] if self.history else []
         return {
             'average_reward': np.mean(total_rewards),
             'std_reward': np.std(total_rewards),
             'success_rate': successes / num_episodes,
             'average_steps': np.mean(total_steps),
-            'std_steps': np.std(total_steps)
+            'std_steps': np.std(total_steps),
+            'learning_curve': learning_curve
         }
     
     def get_action(self, state: int) -> int:

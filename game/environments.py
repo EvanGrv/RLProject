@@ -445,7 +445,7 @@ class MontyHallParadox1(BaseEnvironment):
         # Maintenant on peut faire un vrai reset
         self.reset()
         self._observation_space = type('obj', (), {'n': len(self.states)})()
-        self._action_space = type('obj', (), {'n': max(len(self.doors), len(self.A))})()
+        self._action_space = type('obj', (), {'n': 2})()  # Toujours 2 actions : 0 (rester), 1 (changer)
 
     def state_to_index(self, state):
         return self.state_to_idx[state]
@@ -708,7 +708,7 @@ class MontyHallParadox2(BaseEnvironment):
         # Maintenant on peut faire un vrai reset
         self.reset()
         self._observation_space = type('obj', (), {'n': len(self.states)})()
-        self._action_space = type('obj', (), {'n': max(len(self.doors), len(self.A))})()
+        self._action_space = type('obj', (), {'n': 2})()  # Toujours 2 actions : 0 (rester), 1 (changer)
 
     def state_to_index(self, state):
         return self.state_to_idx[state]
@@ -960,7 +960,7 @@ class MontyHallParadox2(BaseEnvironment):
 # Ce dernier joue aléatoirement au premier round
 # Mais au deuxième round, il joue FORCEMENT le choix de l'agent au premier round
 
-class RockPaperScissors:
+class RockPaperScissors(BaseEnvironment):
     # États du jeu
     INITIAL_STATE = 0
     ROUND1_START = 1
