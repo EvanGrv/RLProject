@@ -1,0 +1,85 @@
+{
+  "datetime": "2025-07-21T17:58:38.666893",
+  "environnement": "MontyHallParadox1",
+  "modele": "ValueIteration",
+  "hyperparametres": {
+    "gamma": 0.99,
+    "theta": 1e-06
+  },
+  "resultats_train": {
+    "V": [
+      0.6599999999999999,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.6666666666666666,
+      0.0
+    ],
+    "policy": [
+      [
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0
+      ],
+      [
+        0.0,
+        1.0
+      ],
+      [
+        0.0,
+        1.0
+      ],
+      [
+        0.0,
+        1.0
+      ],
+      [
+        0.0,
+        1.0
+      ],
+      [
+        0.0,
+        1.0
+      ],
+      [
+        0.0,
+        0.0
+      ]
+    ],
+    "history": [
+      {
+        "iteration": 1,
+        "delta": 0.6666666666666666,
+        "avg_value": 0.0,
+        "max_value": 0.0,
+        "converged": false
+      },
+      {
+        "iteration": 2,
+        "delta": 0.6599999999999999,
+        "avg_value": 0.5,
+        "max_value": 0.6666666666666666,
+        "converged": false
+      },
+      {
+        "iteration": 3,
+        "delta": 0.0,
+        "avg_value": 0.5825,
+        "max_value": 0.6666666666666666,
+        "converged": true
+      }
+    ],
+    "iterations": 3,
+    "converged": true,
+    "final_delta": 0.0
+  },
+  "resultats_eval": null,
+  "score": null,
+  "reward_final": null,
+  "eval_metrics": {}
+}
