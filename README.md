@@ -1,4 +1,4 @@
-# Projet de Reinforcement Learning - 2ème Année
+# Projet de Reinforcement Learning
 
 ## Description
 
